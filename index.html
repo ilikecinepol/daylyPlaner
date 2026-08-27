@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#f7f8fb" />
+  <link rel="manifest" href="/manifest.webmanifest">
+  <title>План — ежедневник</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=1.5" />
+</head>
+<body>
+  <div class="auth-screen" id="auth-screen">
+    <form class="auth-card" id="auth-form">
+      <div class="brand"><span class="brand-mark">П</span><span>план</span></div>
+      <h1 id="auth-title">Войти в ежедневник</h1><p>Задачи, календарь и проекты в одном месте.</p>
+      <label class="register-only hidden">Имя<input name="name" placeholder="Ваше имя"></label>
+      <label class="register-only hidden">Ник в приложении<input name="nickname" placeholder="например, ocean_dev" minlength="3" maxlength="40" pattern="[A-Za-zА-Яа-яЁё0-9_.-]+"></label>
+      <label>Email<input name="email" type="email" required autocomplete="email" placeholder="name@example.com"></label>
+      <label>Пароль<input name="password" type="password" minlength="8" required autocomplete="current-password" placeholder="Не менее 8 символов"></label>
+      <button class="primary wide" id="auth-submit">Войти</button>
+      <button type="button" class="secondary wide" id="auth-switch">Нет аккаунта? Зарегистрироваться</button>
+      <div class="auth-error" id="auth-error"></div>
+    </form>
+  </div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><span class="brand-mark">П</span><span>план</span></div>
+    <button class="primary wide" data-action="add"><span>＋</span> Добавить</button>
+    <nav id="nav">
+      <button class="nav-item active" data-page="today"><span>◉</span> Сегодня <b id="today-count">0</b></button>
+      <button class="nav-item" data-page="calendar"><span>▦</span> Календарь</button>
+      <button class="nav-item" data-page="tasks"><span>✓</span> Задачи</button>
+      <button class="nav-item" data-page="projects"><span>◇</span> Проекты</button>
+      <button class="nav-item" data-page="team"><span>♯</span> Команда</button>
+      <button class="nav-item" data-page="contacts"><span>◎</span> Друзья</button>
+      <button class="nav-item" data-page="inbox"><span>↓</span> Входящие <b id="inbox-count">0</b></button>
+      <button class="nav-item" data-page="templates"><span>▱</span> Шаблоны</button>
+    </nav>
+    <div class="side-section"><small>МОИ ПРОЕКТЫ</small><div id="side-projects"></div></div>
+    <button class="nav-item settings" data-page="settings"><span>⚙</span> Настройки</button>
+  </aside>
+
+  <main>
+    <header>
+      <button class="icon-btn mobile-menu" id="menu-btn">☰</button>
+      <div class="search"><span>⌕</span><input id="search" placeholder="Поиск задач, проектов, тегов…"><kbd>⌘ K</kbd></div>
+      <button class="icon-btn" id="theme-btn" title="Сменить тему">☼</button>
+      <button class="avatar">ДК</button>
+    </header>
+    <div class="content" id="content"></div>
+  </main>
+
+  <button class="fab" data-action="add" aria-label="Добавить задачу">＋</button>
+  <div class="modal-backdrop hidden" id="modal">
+    <form class="modal" id="task-form">
+      <div class="modal-head"><div><span class="eyebrow">НОВАЯ ЗАДАЧА</span><h2>Что нужно сделать?</h2></div><button type="button" class="icon-btn" data-close>×</button></div>
+      <input type="hidden" name="id">
+      <label>Название<input required autofocus name="title" placeholder="Например, подготовить презентацию"></label>
+      <div class="form-grid">
+        <label>Дата<input name="date" type="date"></label>
+        <label>Время<input name="time" type="time"></label>
+        <label>Длительность<select name="duration"><option value="30">30 минут</option><option value="60" selected>1 час</option><option value="90">1,5 часа</option><option value="120">2 часа</option><option value="180">3 часа</option></select></label>
+        <label>Приоритет<select name="priority"><option>P1</option><option>P2</option><option selected>P3</option><option>P4</option></select></label>
+        <label>Проект<select name="project" id="project-select"></select></label>
+        <label>Колонка<select name="column"><option>Идеи</option><option>Запланировано</option><option>В работе</option><option>Готово</option></select></label>
+      </div>
+      <label>Место<input name="location" placeholder="Кабинет, адрес или онлайн"></label>
+      <label>Описание<textarea name="description" rows="3" placeholder="Детали, ссылки и заметки"></textarea></label>
+      <label>Теги<input name="tags" placeholder="Через запятую"></label>
+      <div class="form-grid"><label>Повторение<select name="recurrence"><option value="">Не повторять</option><option value="DAILY">Каждый день</option><option value="WEEKDAYS">По рабочим дням</option><option value="WEEKLY">Каждую неделю</option><option value="MONTHLY">Каждый месяц</option><option value="YEARLY">Каждый год</option></select></label><label>Напоминание<select name="reminder"><option value="">Без напоминания</option><option value="15">За 15 минут</option><option value="30">За 30 минут</option><option value="60">За час</option><option value="1440">За сутки</option></select></label></div>
+      <div class="modal-actions"><button type="button" class="danger hidden" id="delete-task">Удалить</button><span class="spacer"></span><button type="button" class="secondary" data-close>Отмена</button><button class="primary">Сохранить задачу</button></div>
+    </form>
+  </div>
+  <div class="modal-backdrop hidden" id="ui-modal">
+    <form class="modal" id="ui-form">
+      <div class="modal-head"><div><span class="eyebrow">НАСТРОЙКА</span><h2 id="ui-title"></h2></div><button type="button" class="icon-btn" data-ui-close>×</button></div>
+      <div id="ui-fields"></div>
+      <div class="modal-actions"><button type="button" class="secondary" data-ui-close>Отмена</button><button class="primary" id="ui-submit">Сохранить</button></div>
+    </form>
+  </div>
+  <div id="toast"></div>
+  <script src="app.js?v=4.0"></script>
+  <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js')</script>
+</body>
+</html>
