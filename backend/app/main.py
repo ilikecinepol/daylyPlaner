@@ -1,55 +1,35 @@
 import os
+from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Query
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 from .database import Base,engine,get_db
-from .migrations import migrate_legacy
-from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,CalendarConnection,CalendarEventLink,ExternalCalendarEvent,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage
+from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage
 from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn
-from .security import hash_password,verify_password,token,decode_token
-from . import google_calendar as google
+from .security import hash_password,verify_password
 from .services.recurrence import next_occurrence
 from .services.notifications import due_reminders
-from .services.calendar_sync import sync as sync_google
+from .services.bootstrap import initialize_database
+from .api.dependencies import set_session_cookie as cookie,current_user,iso_utc as dt
+from .api.integrations import router as integrations_router
 
-migrate_legacy();Base.metadata.create_all(engine)
-app=FastAPI(title="План API",version="1.0.0",docs_url="/api/docs",openapi_url="/api/openapi.json")
+@asynccontextmanager
+async def lifespan(_app:FastAPI):
+    initialize_database()
+    yield
 
-@app.on_event("startup")
-def upgrade_legacy_data():
-    with next(get_db()) as db:
-        used=set()
-        for u in db.scalars(select(User).order_by(User.created_at)):
-            base=(u.nickname or u.email.split("@")[0]).lower();candidate=base;i=2
-            while candidate in used:candidate=f"{base}{i}";i+=1
-            u.nickname=candidate;used.add(candidate)
-        for p in db.scalars(select(Project).where(Project.deleted_at==None)):
-            if not db.scalar(select(func.count()).select_from(KanbanColumn).where(KanbanColumn.project_id==p.id)):
-                for i,n in enumerate(["Идеи","Запланировано","В работе","Готово"]): db.add(KanbanColumn(project_id=p.id,name=n,position=i))
-            roles=list(db.scalars(select(ProjectRole).where(ProjectRole.project_id==p.id)))
-            if not roles:
-                definitions=[("Владелец","#ff6b45",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Администратор","#e59b35",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Участник","#5577e7",["view","edit_tasks","send_messages"]),("Наблюдатель","#7b818b",["view"])]
-                roles=[ProjectRole(project_id=p.id,name=n,color=c,permissions=perms,position=i) for i,(n,c,perms) in enumerate(definitions)];db.add_all(roles);db.flush()
-            admin_role=next((r for r in roles if r.name=="Администратор"),roles[0])
-            owner_member=db.scalar(select(ProjectMember).where(ProjectMember.project_id==p.id,ProjectMember.user_id==p.user_id))
-            if not owner_member:owner_member=ProjectMember(project_id=p.id,user_id=p.user_id,role_id=admin_role.id);db.add(owner_member);db.flush()
-            if not db.scalar(select(ProjectMemberRole).where(ProjectMemberRole.member_id==owner_member.id,ProjectMemberRole.role_id==admin_role.id)):db.add(ProjectMemberRole(member_id=owner_member.id,role_id=admin_role.id))
-            if not db.scalar(select(ChatChannel).where(ChatChannel.project_id==p.id)):db.add(ChatChannel(project_id=p.id,name="общий",description="Основной канал проекта",position=0))
-        db.flush()
-        for m in db.scalars(select(ProjectMember)):
-            if not db.scalar(select(ProjectMemberRole).where(ProjectMemberRole.member_id==m.id,ProjectMemberRole.role_id==m.role_id)):db.add(ProjectMemberRole(member_id=m.id,role_id=m.role_id))
-        db.flush()
-        db.commit()
+app=FastAPI(title="План API",version="1.0.0",docs_url="/api/docs",openapi_url="/api/openapi.json",lifespan=lifespan)
+app.include_router(integrations_router)
 
-def cookie(response:Response,uid:str): response.set_cookie("plan_session",token(uid),httponly=True,samesite="lax",secure=os.getenv("COOKIE_SECURE","0")=="1",max_age=604800,path="/")
-def current_user(request:Request,db:Session=Depends(get_db)):
-    uid=decode_token(request.cookies.get("plan_session",""));u=db.get(User,uid) if uid else None
-    if not u or u.deleted_at: raise HTTPException(401,"Требуется авторизация")
-    return u
+@app.middleware("http")
+async def reject_cross_origin_writes(request:Request,call_next):
+    if request.method not in {"GET","HEAD","OPTIONS"}:
+        origin=request.headers.get("origin");allowed={value.strip() for value in os.getenv("ALLOWED_ORIGINS","").split(",") if value.strip()}
+        if origin and origin.rstrip("/")!=str(request.base_url).rstrip("/") and origin not in allowed:return Response(status_code=403,content="Cross-origin state change rejected")
+    return await call_next(request)
 def own(db,model,obj_id,user):
     obj=db.get(model,obj_id)
     if not obj or getattr(obj,"user_id",None)!=user.id or getattr(obj,"deleted_at",None): raise HTTPException(404,"Объект не найден")
@@ -84,10 +64,6 @@ def find_user(db,email=None,nickname=None):
     if nickname:return db.scalar(select(User).where(func.lower(User.nickname)==nickname.strip().lower(),User.deleted_at==None))
     if email:return db.scalar(select(User).where(func.lower(User.email)==email.strip().lower(),User.deleted_at==None))
     return None
-def dt(v):
-    if not v:return None
-    if v.tzinfo is None:v=v.replace(tzinfo=timezone.utc)
-    return v.astimezone(timezone.utc).isoformat().replace("+00:00","Z")
 def task_out(db,t):
     reminders=list(db.scalars(select(Reminder).where(Reminder.task_id==t.id)))
     return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"start_at":dt(t.start_at),"due_at":dt(t.due_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
@@ -286,26 +262,6 @@ def send_message(channel_id:str,data:MessageIn,u=Depends(current_user),db:Sessio
         task=db.get(Task,data.attached_task_id)
         if not task or task.project_id!=c.project_id or task.deleted_at:raise HTTPException(400,"Задача не принадлежит проекту")
     m=ChatMessage(channel_id=channel_id,user_id=u.id,content=data.content.strip(),attached_task_id=data.attached_task_id);db.add(m);db.commit();return {"id":m.id,"content":m.content,"created_at":dt(m.created_at),"author":{"id":u.id,"name":u.name},"task":{"id":task.id,"title":task.title,"priority":task.priority,"status":task.status} if task else None}
-@app.get("/api/v1/calendar-connections")
-def connections(u=Depends(current_user),db:Session=Depends(get_db)):return [{"id":x.id,"provider":x.provider,"account":x.external_account_id,"status":x.status,"last_synced_at":dt(x.last_synced_at)} for x in db.scalars(select(CalendarConnection).where(CalendarConnection.user_id==u.id,CalendarConnection.deleted_at==None))]
-@app.post("/api/v1/google/sync")
-def google_sync(u=Depends(current_user),db:Session=Depends(get_db)):
-    c=db.scalar(select(CalendarConnection).where(CalendarConnection.user_id==u.id,CalendarConnection.provider=="google",CalendarConnection.deleted_at==None))
-    if not c:raise HTTPException(404,"Google Calendar не подключён")
-    try:return sync_google(db,c,u.id)
-    except ValueError as exc:db.commit();raise HTTPException(401,str(exc))
-@app.get("/api/v1/google/authorize")
-def google_authorize(u=Depends(current_user)):
-    if not google.configured():raise HTTPException(503,"Google OAuth credentials не настроены")
-    return {"url":google.authorization_url(u.id)}
-@app.get("/api/v1/google/callback")
-def google_callback(code:str,state:str,db:Session=Depends(get_db)):
-    uid=decode_token(state);u=db.get(User,uid) if uid else None
-    if not u:raise HTTPException(400,"Некорректный OAuth state")
-    data=google.exchange(code);c=db.scalar(select(CalendarConnection).where(CalendarConnection.user_id==u.id,CalendarConnection.provider=="google",CalendarConnection.deleted_at==None)) or CalendarConnection(user_id=u.id,provider="google")
-    c.access_token_encrypted=google.encrypt(data.get("access_token",""))
-    if data.get("refresh_token"):c.refresh_token_encrypted=google.encrypt(data["refresh_token"])
-    c.token_expires_at=datetime.now(timezone.utc)+timedelta(seconds=int(data.get("expires_in",3600)));c.status="connected";db.add(c);db.commit();return RedirectResponse("/?calendar=connected")
 @app.get("/api/v1/health")
 def health():return {"status":"ok","database":engine.dialect.name}
 

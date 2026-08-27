@@ -10,11 +10,14 @@ revision="0003";down_revision="0002";branch_labels=None;depends_on=None
 
 def upgrade():
     # Copy legacy values before removing the old sources of truth.
-    op.execute("UPDATE tasks SET duration_minutes = duration WHERE duration_minutes IS NULL")
-    op.execute("UPDATE tasks SET status = 'completed' WHERE completed = true AND status != 'completed'")
-    op.execute("UPDATE tasks SET completed_at = CURRENT_TIMESTAMP WHERE completed = true AND completed_at IS NULL")
+    columns={column["name"] for column in sa.inspect(op.get_bind()).get_columns("tasks")}
+    if "duration" in columns:op.execute("UPDATE tasks SET duration_minutes = duration WHERE duration_minutes IS NULL")
+    if "completed" in columns:
+        op.execute("UPDATE tasks SET status = 'completed' WHERE completed = true AND status != 'completed'")
+        op.execute("UPDATE tasks SET completed_at = CURRENT_TIMESTAMP WHERE completed = true AND completed_at IS NULL")
     with op.batch_alter_table("tasks") as batch:
-        batch.drop_column("date");batch.drop_column("time");batch.drop_column("duration");batch.drop_column("completed");batch.drop_column("column_name")
+        for name in ("date","time","duration","completed","column_name"):
+            if name in columns:batch.drop_column(name)
 
 def downgrade():
     with op.batch_alter_table("tasks") as batch:
