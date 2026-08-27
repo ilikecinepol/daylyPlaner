@@ -36,6 +36,10 @@ alembic revision -m "describe change"
 
 Создайте OAuth Web Client, разрешите Calendar Events scope и добавьте redirect URI из конфигурации. `POST /api/v1/google/sync` выполняет pull перед push, сравнивает timestamps, обновляет истёкший access token один раз, синхронизирует удаления только для связанных событий daylyPlaner и хранит чужие события как `ExternalCalendarEvent`. Отозванный refresh token переводит подключение в `reauthorization_required`.
 
+## Render deployment
+
+Репозиторий содержит `render.yaml`: Blueprint создаёт Docker web service и managed PostgreSQL, генерирует production secret, запускает Alembic перед приложением и проверяет `/api/v1/health`. В Render выберите **New → Blueprint**, подключите GitHub-репозиторий `ilikecinepol/daylyPlaner` и примените Blueprint. После получения публичного URL добавьте Google OAuth variables и используйте `https://<ваш-домен>/api/v1/google/callback` как redirect URI.
+
 ## Напоминания
 
 `GET /api/v1/notifications` выдаёт наступившие in-app reminders и ставит `sent_at`, поэтому повторная выдача исключена. Для фоновой обработки запускайте `python -m app.worker` по расписанию cron/systemd/Kubernetes CronJob; worker одноразовый и не держит цикл внутри web process.

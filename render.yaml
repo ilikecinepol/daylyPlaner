@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: daylyplaner
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    branch: master
+    autoDeploy: true
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: daylyplaner-db
+          property: connectionString
+
+databases:
+  - name: daylyplaner-db
+    plan: free
+    databaseName: planner
+    user: planner
