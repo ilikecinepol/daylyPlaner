@@ -6,7 +6,7 @@ Vanilla HTML/CSS/JavaScript и service worker. `app.js` — единственн
 
 ## Backend и Database
 
-FastAPI + SQLAlchemy 2; SQLite используется локально, PostgreSQL — целевая production БД. Alembic является источником изменений схемы. HTTP orchestration пока находится в `main.py`; recurrence, notifications и calendar sync вынесены в `services/`. Следующий этап — перенос endpoint-групп в `api/` routers.
+FastAPI + SQLAlchemy 2; SQLite используется локально, PostgreSQL — целевая production БД. Alembic является источником изменений схемы. Bootstrap и бизнес-алгоритмы находятся в `services/`, общие HTTP dependencies и integrations — в `api/`. Следующий этап — последовательный перенос оставшихся endpoint-групп из `main.py` в routers.
 
 ## Task, Kanban и Calendar
 

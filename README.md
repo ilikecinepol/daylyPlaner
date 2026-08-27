@@ -20,7 +20,7 @@ python run.py
 
 ## Конфигурация
 
-См. `.env.example`. Основные переменные: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `COOKIE_SECURE`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. При `APP_ENV=production` приложение не запускается без `SECRET_KEY`; production должен использовать HTTPS и `COOKIE_SECURE=1`. Auth cookie имеет `HttpOnly`, `SameSite=Lax` и срок 7 дней. OAuth callback проверяет подписанный и ограниченный по времени `state`.
+См. `.env.example`. Основные переменные: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `COOKIE_SECURE`, `ALLOWED_ORIGINS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. При `APP_ENV=production` приложение не запускается без `SECRET_KEY`, а cookie автоматически получает `Secure`. Auth cookie имеет `HttpOnly`, `SameSite=Lax` и срок 7 дней. OAuth callback проверяет подписанный и ограниченный по времени `state`; cross-origin изменяющие запросы отклоняются, кроме явно разрешённых origins.
 
 ## Миграции
 
@@ -47,6 +47,8 @@ $env:PYTHONPATH='backend'
 python -m pytest -q tests -p no:cacheprovider
 python -m compileall -q backend
 node --check app.js
+node --check frontend/js/api.js
+node --check sw.js
 ```
 
 GitHub Actions запускает те же проверки на `push` и `pull_request` и падает при ошибке тестов. Архитектурные границы описаны в [ARCHITECTURE.md](ARCHITECTURE.md).
