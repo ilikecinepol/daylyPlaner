@@ -1,5 +1,10 @@
 export async function api(path,options={}){
-  const response=await fetch('/api/v1'+path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});
+  let response;
+  try{
+    response=await fetch('/api/v1'+path,{credentials:'include',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});
+  }catch(error){
+    throw Error('Нет связи с сервером. Запустите FastAPI и откройте приложение через его адрес (например, http://127.0.0.1:8000).',{cause:error});
+  }
   if(response.status===204)return null;
   const body=await response.json().catch(()=>({}));
   if(!response.ok){
