@@ -1,29 +1,33 @@
+﻿# Python
 __pycache__/
 *.py[cod]
-
 .pytest_cache/
 .coverage
 htmlcov/
-pytest-cache-files-*/
 
+# Local databases
 *.db
 *.sqlite
 *.sqlite3
 
+# Environment / secrets
 .env
 .env.*
 !.env.example
 
+# Virtual environments
 .venv/
 venv/
 
+# Frontend
 node_modules/
 
-dist/
+# Build
 build/
+dist/
 
+# IDE / OS
 .idea/
 .vscode/
-
 .DS_Store
 Thumbs.db
