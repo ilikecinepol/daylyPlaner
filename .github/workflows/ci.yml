@@ -12,5 +12,5 @@ jobs:
       - run: PYTHONPATH=backend python -m compileall -q backend
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
-      - run: node --check app.js
+      - run: node --input-type=module --check < app.js
       - run: node --check frontend/js/api.js && node --check sw.js
