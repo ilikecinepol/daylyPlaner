@@ -1,6 +1,7 @@
+import {api} from './frontend/js/api.js';
+
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],today=()=>new Date().toISOString().slice(0,10);
 let S={user:null,projects:[],tasks:[],templates:[]},page='today',viewDate=new Date(),calMode='week',projectId=null,taskFilter='active',taskSort='date',query='',authRegister=false,dragTask=null,friendResults=[];
-const api=async(path,opt={})=>{let r=await fetch('/api/v1'+path,{credentials:'include',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});if(r.status===204)return null;let body=await r.json().catch(()=>({}));if(!r.ok){let detail=body.detail;if(Array.isArray(detail))detail=detail.map(x=>{let field=x.loc?.at(-1);if(field==='password')return'Пароль должен содержать не менее 8 символов';if(field==='email')return'Введите корректный email';return x.msg}).join('. ');throw Error(detail||`Ошибка сервера (${r.status})`)}return body};
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const localParts=value=>{if(!value)return{date:'',time:''};let normalized=/Z$|[+-]\d\d:\d\d$/.test(value)?value:value+'Z',d=new Date(normalized);return{date:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`,time:`${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}};
 const project=id=>S.projects.find(p=>p.id===id),column=(p,id)=>p?.columns?.find(c=>c.id===id),isoDate=t=>t.all_day?t.start_at?.slice(0,10)||'':localParts(t.start_at).date,isoTime=t=>t.all_day?'':localParts(t.start_at).time;
