@@ -2,19 +2,23 @@ services:
   - type: web
     name: daylyplaner
     runtime: docker
+    repo: https://github.com/ilikecinepol/daylyPlaner
+    branch: master
     plan: free
+    region: frankfurt
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    branch: master
-    autoDeploy: true
+    dockerCommand: uvicorn app.main:app --app-dir backend --host 0.0.0.0 --port $PORT
+    preDeployCommand: alembic upgrade head
     healthCheckPath: /api/v1/health
+    autoDeployTrigger: commit
     envVars:
       - key: APP_ENV
         value: production
-      - key: COOKIE_SECURE
-        value: "1"
       - key: SECRET_KEY
         generateValue: true
+      - key: COOKIE_SECURE
+        value: "1"
       - key: DATABASE_URL
         fromDatabase:
           name: daylyplaner-db
@@ -23,5 +27,8 @@ services:
 databases:
   - name: daylyplaner-db
     plan: free
-    databaseName: planner
-    user: planner
+    region: frankfurt
+    postgresMajorVersion: "16"
+    databaseName: daylyplaner
+    user: daylyplaner
+    ipAllowList: []
