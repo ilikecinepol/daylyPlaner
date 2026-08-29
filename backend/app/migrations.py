@@ -3,7 +3,7 @@ from .database import engine
 
 SQLITE_COLUMNS={
  "users":{"updated_at":"DATETIME","deleted_at":"DATETIME","nickname":"VARCHAR(40)"},
- "projects":{"updated_at":"DATETIME","deleted_at":"DATETIME","team_label":"VARCHAR(100) DEFAULT ''"},
+ "projects":{"updated_at":"DATETIME","deleted_at":"DATETIME","team_label":"VARCHAR(100) DEFAULT ''","priority":"VARCHAR(2) DEFAULT 'P3'"},
  "tasks":{"column_id":"VARCHAR(36)","start_at":"DATETIME","due_at":"DATETIME","duration_minutes":"INTEGER DEFAULT 60","all_day":"BOOLEAN DEFAULT 0","mentions":"JSON DEFAULT '[]'","recurrence_rule":"VARCHAR(300) DEFAULT ''","completed_at":"DATETIME","sync_version":"INTEGER DEFAULT 1"},
  "task_templates":{"project_id":"VARCHAR(36)","reminders":"JSON DEFAULT '[]'","created_at":"DATETIME","updated_at":"DATETIME","deleted_at":"DATETIME"},
  "contacts":{"tags":"JSON DEFAULT '[]'"}

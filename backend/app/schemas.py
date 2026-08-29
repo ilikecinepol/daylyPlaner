@@ -8,7 +8,7 @@ class TaskPatch(BaseModel):
     model_config=ConfigDict(extra="forbid")
     title:str|None=Field(default=None,min_length=1,max_length=500); description:str|None=None; priority:str|None=Field(default=None,pattern="^P[1-4]$"); status:str|None=None; project_id:str|None=None; column_id:str|None=None; start_at:datetime|None=None; due_at:datetime|None=None; duration_minutes:int|None=Field(default=None,ge=0,le=10080); all_day:bool|None=None; location:str|None=None; tags:list[str]|None=None; mentions:list[str]|None=None; recurrence_rule:str|None=None; reminder_offsets:list[int]|None=None; sync_version:int|None=None
 class ProjectIn(BaseModel):
-    name:str=Field(min_length=1,max_length=160); description:str=""; color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$"); team_label:str=Field(default="",max_length=100)
+    name:str=Field(min_length=1,max_length=160); description:str=""; color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$"); priority:str=Field(default="P3",pattern="^P[1-4]$"); team_label:str=Field(default="",max_length=100)
 class ColumnIn(BaseModel):
     name:str=Field(min_length=1,max_length=100); position:int|None=None
 class TemplateIn(BaseModel):

@@ -62,7 +62,7 @@
         <label>Дата<input name="date" type="date"></label>
         <label>Время<input name="time" type="time"></label>
         <label>Длительность<select name="duration"><option value="30">30 минут</option><option value="60" selected>1 час</option><option value="90">1,5 часа</option><option value="120">2 часа</option><option value="180">3 часа</option></select></label>
-        <label>Приоритет<select name="priority"><option>P1</option><option>P2</option><option selected>P3</option><option>P4</option></select></label>
+        <label>Приоритет<select name="priority"><option value="P1">Критично</option><option value="P2">Важно</option><option value="P3" selected>Обычно</option><option value="P4">Не очень важно</option></select></label>
         <label>Проект<select name="project" id="project-select"></select></label>
         <label>Колонка<select name="column"><option>Идеи</option><option>Запланировано</option><option>В работе</option><option>Готово</option></select></label>
       </div>
@@ -81,7 +81,7 @@
     </form>
   </div>
   <div id="toast"></div>
-  <script type="module" src="app.js?v=4.2"></script>
+  <script type="module" src="app.js?v=4.3"></script>
   <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js')</script>
 </body>
 </html>

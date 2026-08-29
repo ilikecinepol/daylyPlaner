@@ -26,7 +26,7 @@ class Project(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160)); description: Mapped[str] = mapped_column(Text, default="")
-    color: Mapped[str] = mapped_column(String(20), default="#5577e7"); team_label: Mapped[str] = mapped_column(String(100), default="", index=True)
+    color: Mapped[str] = mapped_column(String(20), default="#5577e7"); priority: Mapped[str] = mapped_column(String(2), default="P3"); team_label: Mapped[str] = mapped_column(String(100), default="", index=True)
 
 class KanbanColumn(Base):
     __tablename__ = "kanban_columns"; __table_args__ = (UniqueConstraint("project_id", "position"),)
