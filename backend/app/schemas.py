@@ -16,5 +16,7 @@ class TemplateIn(BaseModel):
 class ContactIn(BaseModel):email:str|None=Field(default=None,max_length=320);user_nickname:str|None=Field(default=None,max_length=40);nickname:str="";tags:list[str]=[]
 class RoleIn(BaseModel):name:str=Field(min_length=1,max_length=80);color:str="#7b818b";permissions:list[str]=[]
 class MemberIn(BaseModel):email:str|None=Field(default=None,max_length=320);user_nickname:str|None=Field(default=None,max_length=40);role_id:str|None=None;role_ids:list[str]=[]
-class ChannelIn(BaseModel):name:str=Field(min_length=1,max_length=100,pattern=r"^[\wа-яА-ЯёЁ-]+$");description:str=""
+class ChannelIn(BaseModel):name:str=Field(min_length=1,max_length=100,pattern=r"^[\wа-яА-ЯёЁ-]+$");description:str="";contact_user_ids:list[str]=[]
 class MessageIn(BaseModel):content:str=Field(default="",max_length=4000);attached_task_id:str|None=None
+class DirectChatIn(BaseModel):friend_user_id:str
+class DirectMessageIn(BaseModel):content:str=Field(min_length=1,max_length=4000)

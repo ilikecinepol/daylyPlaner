@@ -7,8 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 from .database import Base,engine,get_db
-from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage
-from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn
+from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage,DirectChat,DirectChatMember,DirectMessage
+from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,DirectChatIn,DirectMessageIn
 from .security import hash_password,verify_password
 from .services.recurrence import next_occurrence
 from .services.notifications import due_reminders
@@ -64,6 +64,19 @@ def find_user(db,email=None,nickname=None):
     if nickname:return db.scalar(select(User).where(func.lower(User.nickname)==nickname.strip().lower(),User.deleted_at==None))
     if email:return db.scalar(select(User).where(func.lower(User.email)==email.strip().lower(),User.deleted_at==None))
     return None
+def direct_membership(db,chat_id,user):
+    chat=db.get(DirectChat,chat_id)
+    member=db.scalar(select(DirectChatMember).where(DirectChatMember.chat_id==chat_id,DirectChatMember.user_id==user.id)) if chat else None
+    if not chat or not member:raise HTTPException(404,"Чат не найден")
+    return chat
+def direct_chat_out(db,chat,user):
+    people=[]
+    for member in db.scalars(select(DirectChatMember).where(DirectChatMember.chat_id==chat.id)):
+        person=db.get(User,member.user_id)
+        if person:people.append({"id":person.id,"name":person.name,"nickname":person.nickname,"is_me":person.id==user.id})
+    last=db.scalar(select(DirectMessage).where(DirectMessage.chat_id==chat.id,DirectMessage.deleted_at==None).order_by(DirectMessage.created_at.desc()).limit(1))
+    other=next((person for person in people if not person["is_me"]),None)
+    return {"id":chat.id,"name":other["name"] if other else "Чат","members":people,"last_message":last.content if last else "","last_message_at":dt(last.created_at) if last else None,"created_at":dt(chat.created_at)}
 def task_out(db,t):
     reminders=list(db.scalars(select(Reminder).where(Reminder.task_id==t.id)))
     return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"start_at":dt(t.start_at),"due_at":dt(t.due_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
@@ -206,6 +219,34 @@ def delete_contact(contact_id:str,u=Depends(current_user),db:Session=Depends(get
     if not c or c.owner_user_id!=u.id:raise HTTPException(404,"Контакт не найден")
     db.delete(c);db.commit()
 
+@app.get("/api/v1/direct-chats")
+def direct_chats(u=Depends(current_user),db:Session=Depends(get_db)):
+    ids=list(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==u.id)))
+    chats=list(db.scalars(select(DirectChat).where(DirectChat.id.in_(ids)).order_by(DirectChat.updated_at.desc()))) if ids else []
+    return [direct_chat_out(db,chat,u) for chat in chats]
+@app.post("/api/v1/direct-chats",status_code=201)
+def create_direct_chat(data:DirectChatIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    friend=db.get(User,data.friend_user_id)
+    contact=db.scalar(select(Contact).where(Contact.owner_user_id==u.id,Contact.contact_user_id==data.friend_user_id,Contact.status=="accepted"))
+    if not friend or friend.deleted_at or not contact:raise HTTPException(400,"Начать чат можно только с другом")
+    own_ids=set(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==u.id)))
+    friend_ids=set(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==friend.id)))
+    for chat_id in own_ids & friend_ids:
+        member_count=db.scalar(select(func.count()).select_from(DirectChatMember).where(DirectChatMember.chat_id==chat_id))
+        if member_count==2:return direct_chat_out(db,db.get(DirectChat,chat_id),u)
+    chat=DirectChat(created_by=u.id);db.add(chat);db.flush();db.add_all([DirectChatMember(chat_id=chat.id,user_id=u.id),DirectChatMember(chat_id=chat.id,user_id=friend.id)]);db.commit();return direct_chat_out(db,chat,u)
+@app.get("/api/v1/direct-chats/{chat_id}/messages")
+def direct_messages(chat_id:str,before:datetime|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
+    direct_membership(db,chat_id,u);q=select(DirectMessage).where(DirectMessage.chat_id==chat_id,DirectMessage.deleted_at==None)
+    if before:q=q.where(DirectMessage.created_at<before)
+    result=[]
+    for message in reversed(list(db.scalars(q.order_by(DirectMessage.created_at.desc()).limit(100)))):
+        author=db.get(User,message.user_id);result.append({"id":message.id,"content":message.content,"created_at":dt(message.created_at),"author":{"id":author.id,"name":author.name}})
+    return result
+@app.post("/api/v1/direct-chats/{chat_id}/messages",status_code=201)
+def send_direct_message(chat_id:str,data:DirectMessageIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    chat=direct_membership(db,chat_id,u);message=DirectMessage(chat_id=chat_id,user_id=u.id,content=data.content.strip());db.add(message);chat.updated_at=datetime.now(timezone.utc);db.commit();return {"id":message.id,"content":message.content,"created_at":dt(message.created_at),"author":{"id":u.id,"name":u.name}}
+
 @app.post("/api/v1/projects/{project_id}/roles",status_code=201)
 def add_role(project_id:str,data:RoleIn,u=Depends(current_user),db:Session=Depends(get_db)):
     membership(db,project_id,u,"manage_members");pos=db.scalar(select(func.count()).select_from(ProjectRole).where(ProjectRole.project_id==project_id));r=ProjectRole(project_id=project_id,position=pos,**data.model_dump());db.add(r);db.commit();return {"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position}
@@ -240,7 +281,27 @@ def remove_member(member_id:str,u=Depends(current_user),db:Session=Depends(get_d
 
 @app.post("/api/v1/projects/{project_id}/channels",status_code=201)
 def add_channel(project_id:str,data:ChannelIn,u=Depends(current_user),db:Session=Depends(get_db)):
-    membership(db,project_id,u,"manage_channels");pos=db.scalar(select(func.count()).select_from(ChatChannel).where(ChatChannel.project_id==project_id));c=ChatChannel(project_id=project_id,position=pos,**data.model_dump());db.add(c);db.commit();return {"id":c.id,"name":c.name,"description":c.description,"position":c.position}
+    membership(db,project_id,u,"manage_channels");pos=db.scalar(select(func.count()).select_from(ChatChannel).where(ChatChannel.project_id==project_id));c=ChatChannel(project_id=project_id,position=pos,name=data.name,description=data.description);db.add(c)
+    role=db.scalar(select(ProjectRole).where(ProjectRole.project_id==project_id,ProjectRole.name=="Участник")) or db.scalar(select(ProjectRole).where(ProjectRole.project_id==project_id).order_by(ProjectRole.position))
+    allowed=set(db.scalars(select(Contact.contact_user_id).where(Contact.owner_user_id==u.id,Contact.contact_user_id.in_(data.contact_user_ids),Contact.status=="accepted"))) if data.contact_user_ids else set()
+    if len(allowed)!=len(set(data.contact_user_ids)):raise HTTPException(400,"Один из выбранных пользователей не является другом")
+    for user_id in allowed:
+        member=db.scalar(select(ProjectMember).where(ProjectMember.project_id==project_id,ProjectMember.user_id==user_id))
+        if not member:member=ProjectMember(project_id=project_id,user_id=user_id,role_id=role.id);db.add(member);db.flush();db.add(ProjectMemberRole(member_id=member.id,role_id=role.id))
+    db.commit();return {"id":c.id,"name":c.name,"description":c.description,"position":c.position,"contacts_added":len(allowed)}
+@app.patch("/api/v1/channels/{channel_id}")
+def edit_channel(channel_id:str,data:ChannelIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    c=db.get(ChatChannel,channel_id)
+    if not c:raise HTTPException(404,"Канал не найден")
+    membership(db,c.project_id,u,"manage_channels");c.name=data.name;c.description=data.description;db.commit();return {"id":c.id,"name":c.name,"description":c.description,"position":c.position}
+@app.delete("/api/v1/channels/{channel_id}",status_code=204)
+def delete_channel(channel_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    c=db.get(ChatChannel,channel_id)
+    if not c:raise HTTPException(404,"Канал не найден")
+    membership(db,c.project_id,u,"manage_channels")
+    count=db.scalar(select(func.count()).select_from(ChatChannel).where(ChatChannel.project_id==c.project_id))
+    if count<=1:raise HTTPException(400,"Нельзя удалить последний канал проекта")
+    db.delete(c);db.commit()
 @app.get("/api/v1/channels/{channel_id}/messages")
 def messages(channel_id:str,before:datetime|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
     c=db.get(ChatChannel,channel_id)

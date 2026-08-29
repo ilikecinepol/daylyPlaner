@@ -119,3 +119,15 @@ class ChatChannel(Base):
 class ChatMessage(Base):
     __tablename__="chat_messages"
     id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);channel_id:Mapped[str]=mapped_column(ForeignKey("chat_channels.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);content:Mapped[str]=mapped_column(Text,default="");attached_task_id:Mapped[str|None]=mapped_column(ForeignKey("tasks.id",ondelete="SET NULL"),nullable=True);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now);deleted_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
+
+class DirectChat(Base):
+    __tablename__="direct_chats"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);created_by:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
+
+class DirectChatMember(Base):
+    __tablename__="direct_chat_members";__table_args__=(UniqueConstraint("chat_id","user_id"),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);chat_id:Mapped[str]=mapped_column(ForeignKey("direct_chats.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);joined_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
+
+class DirectMessage(Base):
+    __tablename__="direct_messages"
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);chat_id:Mapped[str]=mapped_column(ForeignKey("direct_chats.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);content:Mapped[str]=mapped_column(Text);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now);deleted_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)

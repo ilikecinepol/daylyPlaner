@@ -73,3 +73,29 @@ def test_nickname_friend_search_and_project_admin():
         member_role=next(r for r in project["roles"] if r["name"]=="Участник")
         member=c.post(f'/api/v1/projects/{project["id"]}/members',json={"user_nickname":"ocean_friend","role_ids":[member_role["id"]]});assert member.status_code==201;assert member.json()["nickname"]=="ocean_friend"
         assert c.patch(f'/api/v1/members/{admin["id"]}',json={"user_nickname":"team_boss","role_ids":[member_role["id"]]}).status_code==400
+
+def test_project_independent_direct_chat_between_friends():
+    with TestClient(app) as c:
+        friend=c.post("/api/v1/auth/register",json={"email":"chat-friend@example.com","password":"StrongPass123","name":"Друг чата","nickname":"chat_friend"}).json();c.post("/api/v1/auth/logout")
+        c.post("/api/v1/auth/register",json={"email":"chat-owner@example.com","password":"StrongPass123","name":"Автор чата","nickname":"chat_owner"})
+        c.post("/api/v1/contacts",json={"user_nickname":"chat_friend"})
+        chat_response=c.post("/api/v1/direct-chats",json={"friend_user_id":friend["id"]});assert chat_response.status_code==201
+        chat=chat_response.json();assert chat["name"]=="Друг чата";assert "project_id" not in chat
+        message=c.post(f'/api/v1/direct-chats/{chat["id"]}/messages',json={"content":"Привет без проекта"});assert message.status_code==201
+        c.post("/api/v1/auth/logout");c.post("/api/v1/auth/login",json={"email":"chat-friend@example.com","password":"StrongPass123"})
+        assert c.get("/api/v1/direct-chats").json()[0]["last_message"]=="Привет без проекта"
+        assert c.get(f'/api/v1/direct-chats/{chat["id"]}/messages').json()[0]["content"]=="Привет без проекта"
+        c.post("/api/v1/auth/logout");c.post("/api/v1/auth/register",json={"email":"chat-outsider@example.com","password":"StrongPass123","name":"Посторонний"})
+        assert c.get(f'/api/v1/direct-chats/{chat["id"]}/messages').status_code==404
+
+def test_channel_management_and_add_friends_during_creation():
+    with TestClient(app) as c:
+        friend=c.post("/api/v1/auth/register",json={"email":"channel-friend@example.com","password":"StrongPass123","name":"Друг канала","nickname":"channel_friend"}).json();c.post("/api/v1/auth/logout")
+        c.post("/api/v1/auth/register",json={"email":"channel-owner@example.com","password":"StrongPass123","name":"Владелец","nickname":"channel_owner"})
+        c.post("/api/v1/contacts",json={"user_nickname":"channel_friend"})
+        project=c.post("/api/v1/projects",json={"name":"Каналы","color":"#5577e7"}).json();common=project["channels"][0]
+        created=c.post(f'/api/v1/projects/{project["id"]}/channels',json={"name":"дизайн","description":"Макеты","contact_user_ids":[friend["id"]]});assert created.status_code==201;assert created.json()["contacts_added"]==1
+        refreshed=c.get("/api/v1/projects").json()[0];assert any(m["user_id"]==friend["id"] for m in refreshed["members"])
+        channel=created.json();edited=c.patch(f'/api/v1/channels/{channel["id"]}',json={"name":"продукт","description":"Новый текст"});assert edited.status_code==200;assert edited.json()["name"]=="продукт"
+        assert c.delete(f'/api/v1/channels/{channel["id"]}').status_code==204
+        assert c.delete(f'/api/v1/channels/{common["id"]}').status_code==400
