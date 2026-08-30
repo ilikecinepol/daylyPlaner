@@ -29,3 +29,6 @@ build/
 Thumbs.db
 
 *.log
+
+# Local deployment credentials
+.tmp/
