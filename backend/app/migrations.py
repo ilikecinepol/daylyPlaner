@@ -8,6 +8,9 @@ SQLITE_COLUMNS={
  "task_templates":{"project_id":"VARCHAR(36)","reminders":"JSON DEFAULT '[]'","task_data":"JSON DEFAULT '{}'","created_at":"DATETIME","updated_at":"DATETIME","deleted_at":"DATETIME"},
  "contacts":{"tags":"JSON DEFAULT '[]'"}
 }
+SQLITE_COLUMNS["users"].update({"last_name":"VARCHAR(120) DEFAULT ''","job_title":"VARCHAR(160) DEFAULT ''","profile_status":"VARCHAR(20) DEFAULT 'available'","contact_info":"VARCHAR(500) DEFAULT ''","avatar_data_url":"TEXT DEFAULT ''"})
+SQLITE_COLUMNS["tasks"]["goal_id"]="VARCHAR(36)"
+
 def migrate_legacy():
     if engine.dialect.name!="sqlite": return
     inspector=inspect(engine); tables=set(inspector.get_table_names())

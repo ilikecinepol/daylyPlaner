@@ -1,7 +1,7 @@
 from datetime import datetime,timezone
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
-from ..models import ActivityLog, ChatChannel, ChatMessage, Contact, Project, ProjectMember, Task, TaskTemplate
+from ..models import Goal, ActivityLog, ChatChannel, ChatMessage, Contact, Project, ProjectMember, Task, TaskTemplate
 
 
 def _stamp(value):
@@ -18,5 +18,6 @@ def revision(db:Session,user_id:str):
     activity_count,activity_updated=db.execute(select(func.count(ActivityLog.id),func.max(ActivityLog.created_at)).where(ActivityLog.user_id==user_id)).one()
     contact_count,contact_updated=db.execute(select(func.count(Contact.id),func.max(Contact.created_at)).where(or_(Contact.owner_user_id==user_id,Contact.contact_user_id==user_id))).one()
     template_count,template_updated=db.execute(select(func.count(TaskTemplate.id),func.max(TaskTemplate.updated_at)).where(TaskTemplate.user_id==user_id,TaskTemplate.deleted_at==None)).one()
+    goal_count,goal_updated=db.execute(select(func.count(Goal.id),func.max(Goal.updated_at)).where(Goal.user_id==user_id)).one()
     minute=datetime.now(timezone.utc).strftime("%Y%m%d%H%M")
-    return "|".join(map(str,[task_count,_stamp(task_updated),project_count,_stamp(project_updated),message_count,_stamp(message_updated),activity_count,_stamp(activity_updated),contact_count,_stamp(contact_updated),template_count,_stamp(template_updated),minute]))
+    return "|".join(map(str,[goal_count,_stamp(goal_updated),task_count,_stamp(task_updated),project_count,_stamp(project_updated),message_count,_stamp(message_updated),activity_count,_stamp(activity_updated),contact_count,_stamp(contact_updated),template_count,_stamp(template_updated),minute]))

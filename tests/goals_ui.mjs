@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import {renderGoals,goalOptions,handleGoalAction} from "../frontend/js/goals.js";
+const goal={id:"g1",title:"<Цель>",why:"<script>alert(1)</script>",period:"week",period_start:"2026-08-24",period_end:"2026-08-30"};
+const state={user:{id:"u1"},goals:[goal],tasks:[{id:"t1",user_id:"u1",title:"Task",goal_id:"g1",status:"planned",sync_version:1}],archived:[{id:"t2",goal_id:"g1",status:"completed"}]};
+const html=renderGoals(state,()=>"<div>task</div>","week","2026-08-30");
+assert.ok(html.includes("50%"));
+assert.ok(html.includes("&lt;Цель&gt;"));
+assert.ok(!html.includes("<script>"));
+assert.ok(renderGoals(state,()=>"", "day","2026-08-30").includes("целей пока нет"));
+assert.ok(goalOptions(state.goals,"g1").includes("selected"));
+let request, refreshed=false;
+await handleGoalAction({dataset:{goalAction:"unlink",taskId:"t1"}},{state,api:async(...args)=>request=args,refresh:async()=>refreshed=true});
+assert.equal(request[0],"/tasks/t1");
+assert.deepEqual(JSON.parse(request[1].body),{goal_id:null,sync_version:1});
+assert.ok(refreshed);
+console.log("Goals UI tests passed");

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Boolean, DateTime, ForeignKey, Text, JSON, UniqueConstraint
+from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -24,6 +24,11 @@ class User(Base, TimestampMixin):
     completed_task_archive_days: Mapped[int] = mapped_column(Integer, default=7)
     notification_settings: Mapped[dict] = mapped_column(JSON, default=dict)
     notifications_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_name: Mapped[str] = mapped_column(String(120), default="")
+    job_title: Mapped[str] = mapped_column(String(160), default="")
+    profile_status: Mapped[str] = mapped_column(String(20), default="available")
+    contact_info: Mapped[str] = mapped_column(String(500), default="")
+    avatar_data_url: Mapped[str] = mapped_column(Text, default="")
 
 class Project(Base, TimestampMixin):
     __tablename__ = "projects"
@@ -37,6 +42,17 @@ class KanbanColumn(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(100)); position: Mapped[int] = mapped_column(Integer)
+
+class Goal(Base, TimestampMixin):
+    __tablename__ = "goals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(300))
+    why: Mapped[str] = mapped_column(Text, default="")
+    period: Mapped[str] = mapped_column(String(10))
+    period_start = mapped_column(Date, nullable=False)
+    period_end = mapped_column(Date, nullable=False)
+    parent_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True)
 
 class Task(Base, TimestampMixin):
     __tablename__ = "tasks"
@@ -60,6 +76,7 @@ class Task(Base, TimestampMixin):
     mentions: Mapped[list] = mapped_column(JSON, default=list); recurrence_rule: Mapped[str] = mapped_column(String(300), default="")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True); sync_version: Mapped[int] = mapped_column(Integer, default=1)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True)
 
 class Reminder(Base):
     __tablename__ = "reminders"

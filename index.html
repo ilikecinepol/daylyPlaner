@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2.5" />
+  <link rel="stylesheet" href="styles.css?v=2.7" />
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -32,6 +32,7 @@
       <button class="nav-item active" data-page="today"><span>◉</span> Сегодня <b id="today-count">0</b></button>
       <button class="nav-item" data-page="calendar"><span>▦</span> Календарь</button>
       <button class="nav-item" data-page="tasks"><span>✓</span> Задачи</button>
+      <button class="nav-item" data-page="goals"><span>◎</span> Цели и задачи</button>
       <button class="nav-item" data-page="projects"><span>◇</span> Проекты</button>
       <button class="nav-item" data-page="team"><span>♯</span> Команда</button>
       <button class="nav-item" data-page="contacts"><span>◎</span> Друзья <b id="friend-request-count" class="hidden">0</b></button>
@@ -68,6 +69,7 @@
         <label>После дедлайна<select name="deadline_action"><option value="none">Ничего не делать</option><option value="mark_overdue">Отметить просроченной</option><option value="auto_complete">Завершить автоматически</option></select></label>
         <label>Приоритет<select name="priority"><option value="P1">Критично</option><option value="P2">Важно</option><option value="P3" selected>Обычно</option><option value="P4">Не очень важно</option></select></label>
         <label>Статус<select name="status"><option value="idea">Идеи</option><option value="planned" selected>Запланировано</option><option value="in_progress">В работе</option><option value="completed">Готово</option><option value="cancelled">Отменено</option></select></label>
+        <label>Цель<select name="goal" id="task-goal"></select><small id="task-goal-why"></small></label>
         <label>Проект<select name="project" id="project-select"></select></label>
         <label>Колонка<select name="column"><option>Идеи</option><option>Запланировано</option><option>В работе</option><option>Готово</option></select></label>
         <label>Исполнитель<select name="assignee"><option value="">Не назначен</option></select></label>
@@ -88,7 +90,7 @@
     </form>
   </div>
   <div id="toast"></div>
-  <script type="module" src="app.js?v=6.0"></script>
+  <script type="module" src="app.js?v=6.2"></script>
   <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js')</script>
 </body>
 </html>

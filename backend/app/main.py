@@ -16,8 +16,10 @@ from .services.notifications import due_reminders,filter_notification_feed,notif
 from .services.bootstrap import initialize_database
 from .services.scheduling import is_overdue, normalize_schedule
 from .services.realtime import revision as realtime_revision
+from .schemas import ProfileIn
 from .api.dependencies import set_session_cookie as cookie,current_user,iso_utc as dt
 from .api.integrations import router as integrations_router
+from .api.goals import router as goals_router, owned_goal
 
 @asynccontextmanager
 async def lifespan(_app:FastAPI):
@@ -26,6 +28,7 @@ async def lifespan(_app:FastAPI):
 
 app=FastAPI(title="План API",version="1.0.0",docs_url="/api/docs",openapi_url="/api/openapi.json",lifespan=lifespan)
 app.include_router(integrations_router)
+app.include_router(goals_router)
 
 @app.middleware("http")
 async def reject_cross_origin_writes(request:Request,call_next):
@@ -99,7 +102,7 @@ def sync_task_workflow(db,task,actor,status_changed=False,column_changed=False):
     elif status_changed:task.completed_at=None
 def task_out(db,t):
     reminders=list(db.scalars(select(Reminder).where(Reminder.task_id==t.id)))
-    return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"assigned_to_id":t.assigned_to_id,"assignee":user_brief(db,t.assigned_to_id),"started_by":user_brief(db,t.started_by_id),"completed_by":user_brief(db,t.completed_by_id),"start_at":dt(t.start_at),"end_at":dt(t.end_at),"deadline_at":dt(t.deadline_at),"deadline_action":t.deadline_action or "none","deadline_processed_at":dt(t.deadline_processed_at),"due_at":dt(t.end_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"is_overdue":is_overdue(t),"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"archived_at":dt(t.archived_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
+    return {"id":t.id,"goal_id":t.goal_id,"user_id":t.user_id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"assigned_to_id":t.assigned_to_id,"assignee":user_brief(db,t.assigned_to_id),"started_by":user_brief(db,t.started_by_id),"completed_by":user_brief(db,t.completed_by_id),"start_at":dt(t.start_at),"end_at":dt(t.end_at),"deadline_at":dt(t.deadline_at),"deadline_action":t.deadline_action or "none","deadline_processed_at":dt(t.deadline_processed_at),"due_at":dt(t.end_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"is_overdue":is_overdue(t),"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"archived_at":dt(t.archived_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
 def project_out(db,p):
     roles=list(db.scalars(select(ProjectRole).where(ProjectRole.project_id==p.id).order_by(ProjectRole.position)));members=[]
     for m in db.scalars(select(ProjectMember).where(ProjectMember.project_id==p.id)):
@@ -129,7 +132,11 @@ def login(c:Credentials,response:Response,db:Session=Depends(get_db)):
     cookie(response,u.id);return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone}
 @app.post("/api/v1/auth/logout",status_code=204)
 def logout(response:Response): response.delete_cookie("plan_session",path="/")
-def user_out(u):return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone,"completed_task_archive_policy":u.completed_task_archive_policy or "never","completed_task_archive_days":u.completed_task_archive_days or 7,"notification_settings":notification_settings(u),"notifications_cleared_at":dt(u.notifications_cleared_at)}
+def user_out(u):return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone,"last_name":u.last_name,"job_title":u.job_title,"profile_status":u.profile_status,"contact_info":u.contact_info,"avatar_data_url":u.avatar_data_url,"completed_task_archive_policy":u.completed_task_archive_policy or "never","completed_task_archive_days":u.completed_task_archive_days or 7,"notification_settings":notification_settings(u),"notifications_cleared_at":dt(u.notifications_cleared_at)}
+@app.put("/api/v1/auth/profile")
+def save_profile(data:ProfileIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    for key,value in data.model_dump().items():setattr(u,key,value)
+    db.commit();return user_out(u)
 @app.get("/api/v1/auth/me")
 def me(u=Depends(current_user)): return user_out(u)
 @app.patch("/api/v1/auth/archive-settings")
@@ -155,6 +162,7 @@ def tasks(q:str|None=None,status:str|None=None,priority:str|None=None,project:st
     return [task_out(db,t) for t in db.scalars(s.order_by(Task.start_at.asc().nullslast(),Task.priority))]
 @app.post("/api/v1/tasks",status_code=201)
 def create_task(data:TaskIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    if data.goal_id:owned_goal(db,data.goal_id,u)
     if data.project_id:membership(db,data.project_id,u,"edit_tasks")
     validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=normalize_schedule(data.model_dump(exclude={"reminder_offsets"}));t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
     db.add(t);db.flush();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in data.reminder_offsets];log(db,u,"task_created",t.id);db.commit();return task_out(db,t)
@@ -172,6 +180,9 @@ def patch_task(task_id:str,data:TaskPatch,u=Depends(current_user),db:Session=Dep
     elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
     patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None);deadline_changed=bool({"deadline_at","deadline_action"}&set(patch))
     if expected is not None and expected!=t.sync_version: raise HTTPException(409,"Задача была изменена на другом устройстве")
+    if "goal_id" in patch:
+        if t.user_id != u.id and patch["goal_id"] != t.goal_id:raise HTTPException(403,"Цель может менять только владелец задачи")
+        if patch["goal_id"] and patch["goal_id"] != t.goal_id:owned_goal(db,patch["goal_id"],u)
     offsets=patch.pop("reminder_offsets",None);patch=normalize_schedule(patch,t)
     if deadline_changed:patch["deadline_processed_at"]=None
     before={k:getattr(t,k) for k in patch}
