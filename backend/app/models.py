@@ -40,6 +40,9 @@ class Task(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     column_id: Mapped[str | None] = mapped_column(ForeignKey("kanban_columns.id", ondelete="SET NULL"), nullable=True)
+    assigned_to_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    started_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    completed_by_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     title: Mapped[str] = mapped_column(String(500), index=True); description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String(30), default="planned"); priority: Mapped[str] = mapped_column(String(2), default="P3")
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
@@ -100,6 +103,22 @@ class Contact(Base):
     __tablename__="contacts";__table_args__=(UniqueConstraint("owner_user_id","contact_user_id"),)
     id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);owner_user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);contact_user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);nickname:Mapped[str]=mapped_column(String(120),default="");tags:Mapped[list]=mapped_column(JSON,default=list);status:Mapped[str]=mapped_column(String(30),default="accepted");created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
 
+class FriendRole(Base):
+    __tablename__="friend_roles";__table_args__=(UniqueConstraint("owner_user_id","name"),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);owner_user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);name:Mapped[str]=mapped_column(String(80));color:Mapped[str]=mapped_column(String(20),default="#5577e7")
+
+class ContactFriendRole(Base):
+    __tablename__="contact_friend_roles";__table_args__=(UniqueConstraint("contact_id","role_id"),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);contact_id:Mapped[str]=mapped_column(ForeignKey("contacts.id",ondelete="CASCADE"),index=True);role_id:Mapped[str]=mapped_column(ForeignKey("friend_roles.id",ondelete="CASCADE"),index=True)
+
+class ProjectRoleRule(Base):
+    __tablename__="project_role_rules";__table_args__=(UniqueConstraint("project_id","role_id"),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);project_id:Mapped[str]=mapped_column(ForeignKey("projects.id",ondelete="CASCADE"),index=True);role_id:Mapped[str]=mapped_column(ForeignKey("friend_roles.id",ondelete="CASCADE"),index=True);denied_permissions:Mapped[list]=mapped_column(JSON,default=list)
+
+class ChannelRoleRule(Base):
+    __tablename__="channel_role_rules";__table_args__=(UniqueConstraint("channel_id","role_id"),)
+    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);channel_id:Mapped[str]=mapped_column(ForeignKey("chat_channels.id",ondelete="CASCADE"),index=True);role_id:Mapped[str]=mapped_column(ForeignKey("friend_roles.id",ondelete="CASCADE"),index=True);denied_permissions:Mapped[list]=mapped_column(JSON,default=list)
+
 class ProjectRole(Base):
     __tablename__="project_roles";__table_args__=(UniqueConstraint("project_id","name"),)
     id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);project_id:Mapped[str]=mapped_column(ForeignKey("projects.id",ondelete="CASCADE"),index=True);name:Mapped[str]=mapped_column(String(80));color:Mapped[str]=mapped_column(String(20),default="#7b818b");permissions:Mapped[list]=mapped_column(JSON,default=list);position:Mapped[int]=mapped_column(Integer,default=0)
@@ -119,15 +138,3 @@ class ChatChannel(Base):
 class ChatMessage(Base):
     __tablename__="chat_messages"
     id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);channel_id:Mapped[str]=mapped_column(ForeignKey("chat_channels.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);content:Mapped[str]=mapped_column(Text,default="");attached_task_id:Mapped[str|None]=mapped_column(ForeignKey("tasks.id",ondelete="SET NULL"),nullable=True);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now);deleted_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)
-
-class DirectChat(Base):
-    __tablename__="direct_chats"
-    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);created_by:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now)
-
-class DirectChatMember(Base):
-    __tablename__="direct_chat_members";__table_args__=(UniqueConstraint("chat_id","user_id"),)
-    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);chat_id:Mapped[str]=mapped_column(ForeignKey("direct_chats.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);joined_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now)
-
-class DirectMessage(Base):
-    __tablename__="direct_messages"
-    id:Mapped[str]=mapped_column(String(36),primary_key=True,default=uid);chat_id:Mapped[str]=mapped_column(ForeignKey("direct_chats.id",ondelete="CASCADE"),index=True);user_id:Mapped[str]=mapped_column(ForeignKey("users.id",ondelete="CASCADE"),index=True);content:Mapped[str]=mapped_column(Text);created_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now);updated_at:Mapped[datetime]=mapped_column(DateTime(timezone=True),default=now,onupdate=now);deleted_at:Mapped[datetime|None]=mapped_column(DateTime(timezone=True),nullable=True)

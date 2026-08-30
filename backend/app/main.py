@@ -7,8 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 from .database import Base,engine,get_db
-from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage,DirectChat,DirectChatMember,DirectMessage
-from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,DirectChatIn,DirectMessageIn
+from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage,FriendRole,ContactFriendRole,ProjectRoleRule,ChannelRoleRule
+from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,FriendRoleIn,RoleRuleIn
 from .security import hash_password,verify_password
 from .services.recurrence import next_occurrence
 from .services.notifications import due_reminders
@@ -41,7 +41,17 @@ def membership(db,project_id,user,permission="view"):
     member=db.scalar(select(ProjectMember).where(ProjectMember.project_id==project_id,ProjectMember.user_id==user.id));roles=[db.get(ProjectRole,x.role_id) for x in db.scalars(select(ProjectMemberRole).where(ProjectMemberRole.member_id==member.id))] if member else []
     permissions={perm for role in roles if role for perm in (role.permissions or [])}
     if permission not in permissions:raise HTTPException(403,"Недостаточно прав")
+    owner_contact=db.scalar(select(Contact).where(Contact.owner_user_id==p.user_id,Contact.contact_user_id==user.id,Contact.status=="accepted"))
+    role_ids=list(db.scalars(select(ContactFriendRole.role_id).where(ContactFriendRole.contact_id==owner_contact.id))) if owner_contact else []
+    denied={value for rule in db.scalars(select(ProjectRoleRule).where(ProjectRoleRule.project_id==project_id,ProjectRoleRule.role_id.in_(role_ids))) for value in (rule.denied_permissions or [])} if role_ids else set()
+    if permission in denied:raise HTTPException(403,"Доступ запрещён ролью")
     return p
+def channel_permission(db,channel,user,permission):
+    p=membership(db,channel.project_id,user,"view" if permission=="view" else permission)
+    if p.user_id==user.id:return
+    contact=db.scalar(select(Contact).where(Contact.owner_user_id==p.user_id,Contact.contact_user_id==user.id,Contact.status=="accepted"));role_ids=list(db.scalars(select(ContactFriendRole.role_id).where(ContactFriendRole.contact_id==contact.id))) if contact else []
+    denied={value for rule in db.scalars(select(ChannelRoleRule).where(ChannelRoleRule.channel_id==channel.id,ChannelRoleRule.role_id.in_(role_ids))) for value in (rule.denied_permissions or [])} if role_ids else set()
+    if permission in denied:raise HTTPException(403,"Доступ к каналу запрещён ролью")
 def accessible_projects(db,user):return list(db.scalars(select(ProjectMember.project_id).where(ProjectMember.user_id==user.id)))
 def set_member_roles(db,member,role_ids):
     found={r.id:r for r in db.scalars(select(ProjectRole).where(ProjectRole.id.in_(role_ids),ProjectRole.project_id==member.project_id))} if role_ids else {};roles=[found[x] for x in dict.fromkeys(role_ids) if x in found]
@@ -64,22 +74,29 @@ def find_user(db,email=None,nickname=None):
     if nickname:return db.scalar(select(User).where(func.lower(User.nickname)==nickname.strip().lower(),User.deleted_at==None))
     if email:return db.scalar(select(User).where(func.lower(User.email)==email.strip().lower(),User.deleted_at==None))
     return None
-def direct_membership(db,chat_id,user):
-    chat=db.get(DirectChat,chat_id)
-    member=db.scalar(select(DirectChatMember).where(DirectChatMember.chat_id==chat_id,DirectChatMember.user_id==user.id)) if chat else None
-    if not chat or not member:raise HTTPException(404,"Чат не найден")
-    return chat
-def direct_chat_out(db,chat,user):
-    people=[]
-    for member in db.scalars(select(DirectChatMember).where(DirectChatMember.chat_id==chat.id)):
-        person=db.get(User,member.user_id)
-        if person:people.append({"id":person.id,"name":person.name,"nickname":person.nickname,"is_me":person.id==user.id})
-    last=db.scalar(select(DirectMessage).where(DirectMessage.chat_id==chat.id,DirectMessage.deleted_at==None).order_by(DirectMessage.created_at.desc()).limit(1))
-    other=next((person for person in people if not person["is_me"]),None)
-    return {"id":chat.id,"name":other["name"] if other else "Чат","members":people,"last_message":last.content if last else "","last_message_at":dt(last.created_at) if last else None,"created_at":dt(chat.created_at)}
+def user_brief(db,user_id):
+    user=db.get(User,user_id) if user_id else None
+    return {"id":user.id,"name":user.name,"nickname":user.nickname} if user else None
+def validate_assignee(db,project_id,assigned_to_id,owner_id):
+    if not assigned_to_id:return
+    if not project_id:
+        if assigned_to_id!=owner_id:raise HTTPException(400,"Для личной задачи исполнителем можете быть только вы")
+        return
+    if not db.scalar(select(ProjectMember).where(ProjectMember.project_id==project_id,ProjectMember.user_id==assigned_to_id)):raise HTTPException(400,"Исполнитель не является участником проекта")
+def sync_task_workflow(db,task,actor,status_changed=False,column_changed=False):
+    names={"idea":"идеи","planned":"запланировано","in_progress":"в работе","completed":"готово"}
+    if column_changed and task.column_id:
+        column=db.get(KanbanColumn,task.column_id)
+        reverse={v:k for k,v in names.items()};task.status=reverse.get(column.name.strip().casefold(),task.status) if column else task.status
+    elif status_changed and task.project_id:
+        wanted=names.get(task.status);column=next((c for c in db.scalars(select(KanbanColumn).where(KanbanColumn.project_id==task.project_id)) if c.name.strip().casefold()==wanted),None) if wanted else None
+        if column:task.column_id=column.id
+    if task.status=="in_progress" and status_changed:task.started_by_id=actor.id
+    if task.status=="completed" and status_changed:task.completed_by_id=actor.id;task.completed_at=datetime.now(timezone.utc)
+    elif status_changed:task.completed_at=None
 def task_out(db,t):
     reminders=list(db.scalars(select(Reminder).where(Reminder.task_id==t.id)))
-    return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"start_at":dt(t.start_at),"due_at":dt(t.due_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
+    return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"assigned_to_id":t.assigned_to_id,"assignee":user_brief(db,t.assigned_to_id),"started_by":user_brief(db,t.started_by_id),"completed_by":user_brief(db,t.completed_by_id),"start_at":dt(t.start_at),"due_at":dt(t.due_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
 def project_out(db,p):
     roles=list(db.scalars(select(ProjectRole).where(ProjectRole.project_id==p.id).order_by(ProjectRole.position)));members=[]
     for m in db.scalars(select(ProjectMember).where(ProjectMember.project_id==p.id)):
@@ -89,7 +106,12 @@ def project_out(db,p):
             if legacy:member_roles=[legacy]
         primary=member_roles[0];serialized=[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions} for r in member_roles]
         members.append({"id":m.id,"user_id":m.user_id,"name":user.name,"nickname":user.nickname,"email":user.email,"is_owner":m.user_id==p.user_id,"role_id":primary.id,"role_ids":[r.id for r in member_roles],"role":primary.name,"role_color":primary.color,"roles":serialized})
-    return {"id":p.id,"name":p.name,"description":p.description,"color":p.color,"priority":p.priority,"team_label":p.team_label or "","owner_id":p.user_id,"columns":[{"id":c.id,"name":c.name,"position":c.position} for c in db.scalars(select(KanbanColumn).where(KanbanColumn.project_id==p.id).order_by(KanbanColumn.position))],"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position} for r in roles],"members":members,"channels":[{"id":c.id,"name":c.name,"description":c.description,"position":c.position} for c in db.scalars(select(ChatChannel).where(ChatChannel.project_id==p.id).order_by(ChatChannel.position))]}
+    project_rules=[{"role_id":x.role_id,"denied_permissions":x.denied_permissions or []} for x in db.scalars(select(ProjectRoleRule).where(ProjectRoleRule.project_id==p.id))]
+    channels=[]
+    for c in db.scalars(select(ChatChannel).where(ChatChannel.project_id==p.id).order_by(ChatChannel.position)):
+        rules=[{"role_id":x.role_id,"denied_permissions":x.denied_permissions or []} for x in db.scalars(select(ChannelRoleRule).where(ChannelRoleRule.channel_id==c.id))]
+        channels.append({"id":c.id,"name":c.name,"description":c.description,"position":c.position,"role_rules":rules})
+    return {"id":p.id,"name":p.name,"description":p.description,"color":p.color,"priority":p.priority,"team_label":p.team_label or "","owner_id":p.user_id,"columns":[{"id":c.id,"name":c.name,"position":c.position} for c in db.scalars(select(KanbanColumn).where(KanbanColumn.project_id==p.id).order_by(KanbanColumn.position))],"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position} for r in roles],"members":members,"role_rules":project_rules,"channels":channels}
 def log(db,u,action,task_id=None,changes={}): db.add(ActivityLog(user_id=u.id,task_id=task_id,action=action,changes=changes))
 @app.post("/api/v1/auth/register",status_code=201)
 def register(c:Credentials,response:Response,db:Session=Depends(get_db)):
@@ -120,7 +142,7 @@ def tasks(q:str|None=None,status:str|None=None,priority:str|None=None,project:st
 @app.post("/api/v1/tasks",status_code=201)
 def create_task(data:TaskIn,u=Depends(current_user),db:Session=Depends(get_db)):
     if data.project_id:membership(db,data.project_id,u,"edit_tasks")
-    values=data.model_dump(exclude={"reminder_offsets"});t=Task(user_id=u.id,**values)
+    validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=data.model_dump(exclude={"reminder_offsets"});t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
     db.add(t);db.flush();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in data.reminder_offsets];log(db,u,"task_created",t.id);db.commit();return task_out(db,t)
 @app.get("/api/v1/tasks/{task_id}")
 def get_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
@@ -131,17 +153,19 @@ def get_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
 def patch_task(task_id:str,data:TaskPatch,u=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(Task,task_id)
     if not t or t.deleted_at:raise HTTPException(404,"Задача не найдена")
-    if t.user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
+    if t.project_id:
+        if db.get(Project,t.project_id).user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
+    elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
     patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None)
     if expected is not None and expected!=t.sync_version: raise HTTPException(409,"Задача была изменена на другом устройстве")
     offsets=patch.pop("reminder_offsets",None);before={k:getattr(t,k) for k in patch}
+    validate_assignee(db,patch.get("project_id",t.project_id),patch.get("assigned_to_id",t.assigned_to_id),u.id)
     for k,v in patch.items(): setattr(t,k,v)
+    sync_task_workflow(db,t,u,status_changed="status" in patch,column_changed="column_id" in patch and "status" not in patch)
     if "status" in patch and patch["status"]=="completed":
-        t.completed_at=datetime.now(timezone.utc)
         nxt=next_occurrence(t.start_at,t.recurrence_rule)
         if nxt and not db.scalar(select(Task).where(Task.user_id==u.id,Task.title==t.title,Task.start_at==nxt,Task.deleted_at==None)):
             child=Task(user_id=u.id,project_id=t.project_id,column_id=t.column_id,title=t.title,description=t.description,status="planned",priority=t.priority,start_at=nxt,due_at=(t.due_at+(nxt-t.start_at)) if t.due_at else None,duration_minutes=t.duration_minutes,all_day=t.all_day,location=t.location,tags=t.tags,mentions=t.mentions,recurrence_rule=t.recurrence_rule);db.add(child);db.flush();[db.add(Reminder(task_id=child.id,offset_minutes=r.offset_minutes,channel=r.channel)) for r in db.scalars(select(Reminder).where(Reminder.task_id==t.id))]
-    elif "status" in patch:t.completed_at=None
     t.sync_version=(t.sync_version or 0)+1
     if offsets is not None:db.query(Reminder).filter(Reminder.task_id==t.id).delete();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in offsets]
     log(db,u,"task_updated",t.id,{k:[str(before[k]),str(v)] for k,v in patch.items() if before[k]!=v});db.commit();return task_out(db,t)
@@ -149,7 +173,9 @@ def patch_task(task_id:str,data:TaskPatch,u=Depends(current_user),db:Session=Dep
 def delete_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(Task,task_id)
     if not t or t.deleted_at:raise HTTPException(404,"Задача не найдена")
-    if t.user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
+    if t.project_id:
+        if db.get(Project,t.project_id).user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
+    elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
     t.deleted_at=datetime.now(timezone.utc);t.sync_version+=1;log(db,u,"task_deleted",t.id);db.commit()
 
 @app.get("/api/v1/calendar")
@@ -184,12 +210,29 @@ def activity(u=Depends(current_user),db:Session=Depends(get_db)):return [{"id":x
 @app.get("/api/v1/notifications")
 def notifications(u=Depends(current_user),db:Session=Depends(get_db)):
     return [{**item,"start_at":dt(item["start_at"])} for item in due_reminders(db,u.id)]
+@app.get("/api/v1/notifications/feed")
+def notification_feed(u=Depends(current_user),db:Session=Depends(get_db)):
+    result=[]
+    for request in db.scalars(select(Contact).where(Contact.contact_user_id==u.id,Contact.status=="pending").order_by(Contact.created_at.desc())):
+        sender=db.get(User,request.owner_user_id);result.append({"id":"friend-in-"+request.id,"type":"friend_incoming","title":f"{sender.name} хочет добавить вас в друзья","request_id":request.id,"created_at":dt(request.created_at)})
+    for request in db.scalars(select(Contact).where(Contact.owner_user_id==u.id,Contact.status.in_(["pending","accepted","rejected"])).order_by(Contact.created_at.desc())):
+        person=db.get(User,request.contact_user_id);labels={"pending":"ожидает ответа","accepted":"принята","rejected":"отклонена"};result.append({"id":"friend-out-"+request.id,"type":"friend_outgoing","title":f"Заявка для @{person.nickname}: {labels[request.status]}","status":request.status,"created_at":dt(request.created_at)})
+    for task in db.scalars(select(Task).where(Task.assigned_to_id==u.id,Task.user_id!=u.id,Task.deleted_at==None).order_by(Task.updated_at.desc()).limit(50)):
+        author=db.get(User,task.user_id);result.append({"id":"task-"+task.id,"type":"task_assigned","title":f"{author.name} назначил вам задачу «{task.title}»","task_id":task.id,"created_at":dt(task.updated_at)})
+    return sorted(result,key=lambda x:x["created_at"] or "",reverse=True)
 
 @app.get("/api/v1/contacts")
 def contacts(u=Depends(current_user),db:Session=Depends(get_db)):
     result=[]
     for c in db.scalars(select(Contact).where(Contact.owner_user_id==u.id,Contact.status=="accepted")):
-        person=db.get(User,c.contact_user_id);result.append({"id":c.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":c.nickname,"tags":c.tags or []})
+        person=db.get(User,c.contact_user_id);roles=[db.get(FriendRole,x.role_id) for x in db.scalars(select(ContactFriendRole).where(ContactFriendRole.contact_id==c.id))];result.append({"id":c.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":c.nickname,"tags":c.tags or [],"role_ids":[r.id for r in roles if r],"roles":[{"id":r.id,"name":r.name,"color":r.color} for r in roles if r]})
+    return result
+@app.get("/api/v1/friend-requests")
+def friend_requests(u=Depends(current_user),db:Session=Depends(get_db)):
+    result=[]
+    for request in db.scalars(select(Contact).where(Contact.contact_user_id==u.id,Contact.status=="pending").order_by(Contact.created_at.desc())):
+        sender=db.get(User,request.owner_user_id)
+        if sender and not sender.deleted_at:result.append({"id":request.id,"user_id":sender.id,"name":sender.name,"nickname":sender.nickname,"created_at":dt(request.created_at)})
     return result
 @app.get("/api/v1/users/search")
 def search_users(q:str=Query(min_length=2,max_length=40),u=Depends(current_user),db:Session=Depends(get_db)):
@@ -202,50 +245,63 @@ def add_contact(data:ContactIn,u=Depends(current_user),db:Session=Depends(get_db
     if not person:raise HTTPException(404,"Пользователь с таким ником не найден")
     if person.id==u.id:raise HTTPException(400,"Нельзя добавить себя")
     c=db.scalar(select(Contact).where(Contact.owner_user_id==u.id,Contact.contact_user_id==person.id))
-    if not c:c=Contact(owner_user_id=u.id,contact_user_id=person.id,nickname=data.nickname,tags=data.tags,status="accepted");db.add(c)
-    else:c.nickname=data.nickname;c.tags=data.tags;c.status="accepted"
-    if not db.scalar(select(Contact).where(Contact.owner_user_id==person.id,Contact.contact_user_id==u.id)):db.add(Contact(owner_user_id=person.id,contact_user_id=u.id,status="accepted"))
-    db.flush();[sync_team_label(db,p) for p in db.scalars(select(Project).where(Project.user_id==u.id,Project.deleted_at==None))];db.commit();return {"id":c.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":c.nickname,"tags":c.tags or []}
+    if c and c.status=="accepted":raise HTTPException(400,"Этот пользователь уже в друзьях")
+    if not c:c=Contact(owner_user_id=u.id,contact_user_id=person.id,nickname=data.nickname,tags=data.tags,status="pending");db.add(c)
+    else:c.nickname=data.nickname;c.tags=data.tags;c.status="pending"
+    db.commit();return {"id":c.id,"user_id":person.id,"name":person.name,"user_nickname":person.nickname,"status":"pending"}
+@app.post("/api/v1/friend-requests/{request_id}/accept")
+def accept_friend_request(request_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    request=db.get(Contact,request_id)
+    if not request or request.contact_user_id!=u.id or request.status!="pending":raise HTTPException(404,"Запрос не найден")
+    request.status="accepted";reverse=db.scalar(select(Contact).where(Contact.owner_user_id==u.id,Contact.contact_user_id==request.owner_user_id))
+    if not reverse:reverse=Contact(owner_user_id=u.id,contact_user_id=request.owner_user_id,status="accepted");db.add(reverse)
+    else:reverse.status="accepted"
+    db.commit();person=db.get(User,request.owner_user_id);return {"id":reverse.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":reverse.nickname,"tags":reverse.tags or []}
+@app.post("/api/v1/friend-requests/{request_id}/reject",status_code=204)
+def reject_friend_request(request_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    request=db.get(Contact,request_id)
+    if not request or request.contact_user_id!=u.id or request.status!="pending":raise HTTPException(404,"Запрос не найден")
+    request.status="rejected";db.commit()
 @app.patch("/api/v1/contacts/{contact_id}")
 def edit_contact(contact_id:str,data:ContactIn,u=Depends(current_user),db:Session=Depends(get_db)):
     c=db.get(Contact,contact_id)
     if not c or c.owner_user_id!=u.id:raise HTTPException(404,"Контакт не найден")
     person=db.get(User,c.contact_user_id)
     if data.email and data.email.lower()!=person.email.lower():raise HTTPException(400,"Email контакта менять нельзя")
-    c.nickname=data.nickname;c.tags=data.tags;[sync_team_label(db,p) for p in db.scalars(select(Project).where(Project.user_id==u.id,Project.deleted_at==None))];db.commit();return {"id":c.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":c.nickname,"tags":c.tags or []}
+    roles=list(db.scalars(select(FriendRole).where(FriendRole.owner_user_id==u.id,FriendRole.id.in_(data.role_ids)))) if data.role_ids else []
+    if len(roles)!=len(set(data.role_ids)):raise HTTPException(400,"Неизвестная роль")
+    c.nickname=data.nickname;c.tags=data.tags;db.query(ContactFriendRole).filter(ContactFriendRole.contact_id==c.id).delete();db.add_all([ContactFriendRole(contact_id=c.id,role_id=r.id) for r in roles]);[sync_team_label(db,p) for p in db.scalars(select(Project).where(Project.user_id==u.id,Project.deleted_at==None))];db.commit();return {"id":c.id,"user_id":person.id,"name":person.name,"email":person.email,"user_nickname":person.nickname,"nickname":c.nickname,"tags":c.tags or [],"role_ids":[r.id for r in roles],"roles":[{"id":r.id,"name":r.name,"color":r.color} for r in roles]}
 @app.delete("/api/v1/contacts/{contact_id}",status_code=204)
 def delete_contact(contact_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     c=db.get(Contact,contact_id)
     if not c or c.owner_user_id!=u.id:raise HTTPException(404,"Контакт не найден")
     db.delete(c);db.commit()
 
-@app.get("/api/v1/direct-chats")
-def direct_chats(u=Depends(current_user),db:Session=Depends(get_db)):
-    ids=list(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==u.id)))
-    chats=list(db.scalars(select(DirectChat).where(DirectChat.id.in_(ids)).order_by(DirectChat.updated_at.desc()))) if ids else []
-    return [direct_chat_out(db,chat,u) for chat in chats]
-@app.post("/api/v1/direct-chats",status_code=201)
-def create_direct_chat(data:DirectChatIn,u=Depends(current_user),db:Session=Depends(get_db)):
-    friend=db.get(User,data.friend_user_id)
-    contact=db.scalar(select(Contact).where(Contact.owner_user_id==u.id,Contact.contact_user_id==data.friend_user_id,Contact.status=="accepted"))
-    if not friend or friend.deleted_at or not contact:raise HTTPException(400,"Начать чат можно только с другом")
-    own_ids=set(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==u.id)))
-    friend_ids=set(db.scalars(select(DirectChatMember.chat_id).where(DirectChatMember.user_id==friend.id)))
-    for chat_id in own_ids & friend_ids:
-        member_count=db.scalar(select(func.count()).select_from(DirectChatMember).where(DirectChatMember.chat_id==chat_id))
-        if member_count==2:return direct_chat_out(db,db.get(DirectChat,chat_id),u)
-    chat=DirectChat(created_by=u.id);db.add(chat);db.flush();db.add_all([DirectChatMember(chat_id=chat.id,user_id=u.id),DirectChatMember(chat_id=chat.id,user_id=friend.id)]);db.commit();return direct_chat_out(db,chat,u)
-@app.get("/api/v1/direct-chats/{chat_id}/messages")
-def direct_messages(chat_id:str,before:datetime|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
-    direct_membership(db,chat_id,u);q=select(DirectMessage).where(DirectMessage.chat_id==chat_id,DirectMessage.deleted_at==None)
-    if before:q=q.where(DirectMessage.created_at<before)
-    result=[]
-    for message in reversed(list(db.scalars(q.order_by(DirectMessage.created_at.desc()).limit(100)))):
-        author=db.get(User,message.user_id);result.append({"id":message.id,"content":message.content,"created_at":dt(message.created_at),"author":{"id":author.id,"name":author.name}})
-    return result
-@app.post("/api/v1/direct-chats/{chat_id}/messages",status_code=201)
-def send_direct_message(chat_id:str,data:DirectMessageIn,u=Depends(current_user),db:Session=Depends(get_db)):
-    chat=direct_membership(db,chat_id,u);message=DirectMessage(chat_id=chat_id,user_id=u.id,content=data.content.strip());db.add(message);chat.updated_at=datetime.now(timezone.utc);db.commit();return {"id":message.id,"content":message.content,"created_at":dt(message.created_at),"author":{"id":u.id,"name":u.name}}
+@app.get("/api/v1/friend-roles")
+def friend_roles(u=Depends(current_user),db:Session=Depends(get_db)):return [{"id":r.id,"name":r.name,"color":r.color} for r in db.scalars(select(FriendRole).where(FriendRole.owner_user_id==u.id).order_by(FriendRole.name))]
+@app.post("/api/v1/friend-roles",status_code=201)
+def create_friend_role(data:FriendRoleIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    r=FriendRole(owner_user_id=u.id,**data.model_dump());db.add(r);db.commit();return {"id":r.id,"name":r.name,"color":r.color}
+@app.delete("/api/v1/friend-roles/{role_id}",status_code=204)
+def delete_friend_role(role_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    r=db.get(FriendRole,role_id)
+    if not r or r.owner_user_id!=u.id:raise HTTPException(404,"Роль не найдена")
+    db.delete(r);db.commit()
+@app.put("/api/v1/projects/{project_id}/role-rules")
+def set_project_role_rule(project_id:str,data:RoleRuleIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    p=own(db,Project,project_id,u);role=db.get(FriendRole,data.role_id)
+    if not role or role.owner_user_id!=u.id:raise HTTPException(400,"Роль не найдена")
+    rule=db.scalar(select(ProjectRoleRule).where(ProjectRoleRule.project_id==p.id,ProjectRoleRule.role_id==role.id))
+    if not rule:rule=ProjectRoleRule(project_id=p.id,role_id=role.id);db.add(rule)
+    rule.denied_permissions=data.denied_permissions;db.commit();return {"role_id":role.id,"denied_permissions":rule.denied_permissions}
+@app.put("/api/v1/channels/{channel_id}/role-rules")
+def set_channel_role_rule(channel_id:str,data:RoleRuleIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    channel=db.get(ChatChannel,channel_id);p=own(db,Project,channel.project_id,u) if channel else None;role=db.get(FriendRole,data.role_id)
+    if not p or not role or role.owner_user_id!=u.id:raise HTTPException(400,"Роль не найдена")
+    rule=db.scalar(select(ChannelRoleRule).where(ChannelRoleRule.channel_id==channel.id,ChannelRoleRule.role_id==role.id))
+    if not rule:rule=ChannelRoleRule(channel_id=channel.id,role_id=role.id);db.add(rule)
+    rule.denied_permissions=data.denied_permissions;db.commit();return {"role_id":role.id,"denied_permissions":rule.denied_permissions}
+
 
 @app.post("/api/v1/projects/{project_id}/roles",status_code=201)
 def add_role(project_id:str,data:RoleIn,u=Depends(current_user),db:Session=Depends(get_db)):
@@ -259,7 +315,12 @@ def edit_role(role_id:str,data:RoleIn,u=Depends(current_user),db:Session=Depends
     r.name=data.name;r.color=data.color;r.permissions=data.permissions;db.commit();return {"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position}
 @app.post("/api/v1/projects/{project_id}/members",status_code=201)
 def add_member(project_id:str,data:MemberIn,u=Depends(current_user),db:Session=Depends(get_db)):
-    membership(db,project_id,u,"manage_members");person=find_user(db,data.email,data.user_nickname);role_ids=data.role_ids or ([data.role_id] if data.role_id else [])
+    if data.channel_id:
+        channel=db.get(ChatChannel,data.channel_id)
+        if not channel or channel.project_id!=project_id:raise HTTPException(400,"Канал не принадлежит проекту")
+        channel_permission(db,channel,u,"manage_members")
+    else:membership(db,project_id,u,"manage_members")
+    person=find_user(db,data.email,data.user_nickname);role_ids=data.role_ids or ([data.role_id] if data.role_id else [])
     if not person:raise HTTPException(404,"Пользователь не найден")
     m=db.scalar(select(ProjectMember).where(ProjectMember.project_id==project_id,ProjectMember.user_id==person.id))
     if not m:m=ProjectMember(project_id=project_id,user_id=person.id,role_id=role_ids[0] if role_ids else "");db.add(m);db.flush()
@@ -306,7 +367,7 @@ def delete_channel(channel_id:str,u=Depends(current_user),db:Session=Depends(get
 def messages(channel_id:str,before:datetime|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
     c=db.get(ChatChannel,channel_id)
     if not c:raise HTTPException(404,"Канал не найден")
-    membership(db,c.project_id,u);q=select(ChatMessage).where(ChatMessage.channel_id==channel_id,ChatMessage.deleted_at==None)
+    channel_permission(db,c,u,"view");q=select(ChatMessage).where(ChatMessage.channel_id==channel_id,ChatMessage.deleted_at==None)
     if before:q=q.where(ChatMessage.created_at<before)
     result=[]
     for m in reversed(list(db.scalars(q.order_by(ChatMessage.created_at.desc()).limit(100)))):
@@ -316,7 +377,7 @@ def messages(channel_id:str,before:datetime|None=None,u=Depends(current_user),db
 def send_message(channel_id:str,data:MessageIn,u=Depends(current_user),db:Session=Depends(get_db)):
     c=db.get(ChatChannel,channel_id)
     if not c:raise HTTPException(404,"Канал не найден")
-    membership(db,c.project_id,u,"send_messages")
+    channel_permission(db,c,u,"send_messages")
     if not data.content.strip() and not data.attached_task_id:raise HTTPException(400,"Сообщение пустое")
     task=None
     if data.attached_task_id:

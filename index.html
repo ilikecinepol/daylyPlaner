@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2.0" />
+  <link rel="stylesheet" href="styles.css?v=2.1" />
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -34,8 +34,7 @@
       <button class="nav-item" data-page="tasks"><span>✓</span> Задачи</button>
       <button class="nav-item" data-page="projects"><span>◇</span> Проекты</button>
       <button class="nav-item" data-page="team"><span>♯</span> Команда</button>
-      <button class="nav-item" data-page="chats"><span>◌</span> Чаты</button>
-      <button class="nav-item" data-page="contacts"><span>◎</span> Друзья</button>
+      <button class="nav-item" data-page="contacts"><span>◎</span> Друзья <b id="friend-request-count" class="hidden">0</b></button>
       <button class="nav-item" data-page="inbox"><span>↓</span> Входящие <b id="inbox-count">0</b></button>
       <button class="nav-item" data-page="templates"><span>▱</span> Шаблоны</button>
     </nav>
@@ -47,6 +46,7 @@
     <header>
       <button class="icon-btn mobile-menu" id="menu-btn">☰</button>
       <div class="search"><span>⌕</span><input id="search" placeholder="Поиск задач, проектов, тегов…"><kbd>⌘ K</kbd></div>
+      <button class="icon-btn hidden" id="friends-alert" title="Новые запросы в друзья">♢</button>
       <button class="icon-btn" id="theme-btn" title="Сменить тему">☼</button>
       <button class="avatar">ДК</button>
     </header>
@@ -65,8 +65,10 @@
         <label>Окончание<input name="end_time" type="time"></label>
         <label>Длительность<select name="duration"><option value="30">30 минут</option><option value="60" selected>1 час</option><option value="90">1,5 часа</option><option value="120">2 часа</option><option value="180">3 часа</option></select></label>
         <label>Приоритет<select name="priority"><option value="P1">Критично</option><option value="P2">Важно</option><option value="P3" selected>Обычно</option><option value="P4">Не очень важно</option></select></label>
+        <label>Статус<select name="status"><option value="idea">Идеи</option><option value="planned" selected>Запланировано</option><option value="in_progress">В работе</option><option value="completed">Готово</option></select></label>
         <label>Проект<select name="project" id="project-select"></select></label>
         <label>Колонка<select name="column"><option>Идеи</option><option>Запланировано</option><option>В работе</option><option>Готово</option></select></label>
+        <label>Исполнитель<select name="assignee"><option value="">Не назначен</option></select></label>
       </div>
       <label>Место<input name="location" placeholder="Кабинет, адрес или онлайн"></label>
       <label>Описание<textarea name="description" rows="3" placeholder="Детали, ссылки и заметки"></textarea></label>
@@ -83,7 +85,7 @@
     </form>
   </div>
   <div id="toast"></div>
-  <script type="module" src="app.js?v=4.7"></script>
+  <script type="module" src="app.js?v=5.2"></script>
   <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js')</script>
 </body>
 </html>

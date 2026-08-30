@@ -1,12 +1,21 @@
+import os,sqlite3
+from datetime import datetime
+from pathlib import Path
 from sqlalchemy import select,func
-from ..database import Base,engine,SessionLocal
+from ..database import Base,engine,SessionLocal,DEFAULT_DB_PATH
 from ..migrations import migrate_legacy
 from ..models import User,Project,KanbanColumn,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel
 
 ROLE_DEFINITIONS=[("Владелец","#ff6b45",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Администратор","#e59b35",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Участник","#5577e7",["view","edit_tasks","send_messages"]),("Наблюдатель","#7b818b",["view"])]
 
+def backup_local_database():
+    if os.getenv("DATABASE_URL") or not DEFAULT_DB_PATH.exists() or not DEFAULT_DB_PATH.stat().st_size:return
+    backup_dir=DEFAULT_DB_PATH.parent/"backups";backup_dir.mkdir(exist_ok=True)
+    target=backup_dir/f"planner-{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.db"
+    with sqlite3.connect(DEFAULT_DB_PATH) as source,sqlite3.connect(target) as destination:source.backup(destination)
+
 def initialize_database():
-    migrate_legacy();Base.metadata.create_all(engine)
+    backup_local_database();migrate_legacy();Base.metadata.create_all(engine)
     with SessionLocal() as db:
         used=set()
         for user in db.scalars(select(User).order_by(User.created_at)):
