@@ -8,9 +8,15 @@ Vanilla HTML/CSS/JavaScript и service worker. `app.js` — единственн
 
 FastAPI + SQLAlchemy 2; SQLite используется локально, PostgreSQL — целевая production БД. Alembic является источником изменений схемы. Bootstrap и бизнес-алгоритмы находятся в `services/`, общие HTTP dependencies и integrations — в `api/`. Следующий этап — последовательный перенос оставшихся endpoint-групп из `main.py` в routers.
 
+Клиент держит авторизованное SSE-подключение к `/api/v1/events`. Сервис `services/realtime.py` вычисляет пользовательскую ревизию доступных задач, проектов, сообщений и уведомлений; при её изменении браузер без перезагрузки страницы обновляет локальное состояние. Heartbeat поддерживает соединение через reverse proxy, а `X-Accel-Buffering: no` запрещает буферизацию потока.
+
 ## Task, Kanban и Calendar
 
-`Task` — единая сущность для Kanban и собственного календаря. Источники истины: `start_at`, `due_at`, `duration_minutes`, `all_day`, `status`, `priority`, `project_id`, `column_id`, `location`, `mentions`, `recurrence_rule`. Legacy-поля удаляются migration `0003`. Kanban меняет `column_id`, календарь — scheduling fields; optimistic concurrency обеспечивается `sync_version`.
+`Task` — единая сущность для Kanban и собственного календаря. Календарный блок задают `start_at`, `end_at`, `duration_minutes` и `all_day`; независимый срок выполнения хранится в `deadline_at`, а `is_overdue` вычисляется на backend. `deadline_action` выбирает идемпотентное поведение worker: ничего не делать, отметить просрочку или автоматически завершить; `deadline_processed_at` защищает от повторной обработки. Поле `due_at` временно остаётся только как legacy-псевдоним `end_at` в API. Workflow-статусы: `idea`, `planned`, `in_progress`, `completed`, `cancelled`. Остальные источники истины: `priority`, `project_id`, `column_id`, `location`, `mentions`, `recurrence_rule`. Legacy-поля удаляются migration `0003`, разделение окончания и дедлайна выполняется migration `0008`, политики дедлайна добавляются migration `0009`. Kanban меняет `column_id`, календарь — scheduling fields; optimistic concurrency обеспечивается `sync_version`.
+
+`TaskTemplate.task_data` хранит полный API-параметр карточки задачи. Выбор и создание шаблона находятся непосредственно в форме задачи; отдельного экрана шаблонов нет. Для старых записей API формирует совместимый `task_data` из legacy-полей.
+
+Свободную проектную задачу участник с разрешением `edit_tasks` может назначить себе через `/tasks/{id}/assign-self`. Операция идемпотентна и не позволяет перехватить задачу другого исполнителя. Уведомления владельцу и администраторам проекта сохраняются как адресные записи `ActivityLog`.
 
 ## Google integration
 

@@ -20,6 +20,10 @@ class User(Base, TimestampMixin):
     password_hash: Mapped[str] = mapped_column(String(256))
     name: Mapped[str] = mapped_column(String(120), default="Пользователь")
     timezone: Mapped[str] = mapped_column(String(80), default="Europe/Moscow")
+    completed_task_archive_policy: Mapped[str] = mapped_column(String(30), default="never")
+    completed_task_archive_days: Mapped[int] = mapped_column(Integer, default=7)
+    notification_settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    notifications_cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 class Project(Base, TimestampMixin):
     __tablename__ = "projects"
@@ -47,10 +51,15 @@ class Task(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(30), default="planned"); priority: Mapped[str] = mapped_column(String(2), default="P3")
     start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deadline_action: Mapped[str] = mapped_column(String(30), default="none")
+    deadline_processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=60); all_day: Mapped[bool] = mapped_column(Boolean, default=False)
     location: Mapped[str] = mapped_column(String(300), default=""); tags: Mapped[list] = mapped_column(JSON, default=list)
     mentions: Mapped[list] = mapped_column(JSON, default=list); recurrence_rule: Mapped[str] = mapped_column(String(300), default="")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True); sync_version: Mapped[int] = mapped_column(Integer, default=1)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 class Reminder(Base):
     __tablename__ = "reminders"
@@ -64,6 +73,7 @@ class TaskTemplate(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(160)); icon: Mapped[str] = mapped_column(String(10), default="✦"); description: Mapped[str] = mapped_column(Text, default="")
     duration: Mapped[int] = mapped_column(Integer, default=60); priority: Mapped[str] = mapped_column(String(2), default="P3"); location: Mapped[str] = mapped_column(String(300), default="")
     project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True); reminders: Mapped[list] = mapped_column(JSON, default=list)
+    task_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
 class ActivityLog(Base):
     __tablename__ = "activity_log"

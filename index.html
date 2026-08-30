@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Unbounded:wght@600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=2.2" />
+  <link rel="stylesheet" href="styles.css?v=2.5" />
 </head>
 <body>
   <div class="auth-screen" id="auth-screen">
@@ -36,7 +36,6 @@
       <button class="nav-item" data-page="team"><span>♯</span> Команда</button>
       <button class="nav-item" data-page="contacts"><span>◎</span> Друзья <b id="friend-request-count" class="hidden">0</b></button>
       <button class="nav-item" data-page="inbox"><span>↓</span> Входящие <b id="inbox-count">0</b></button>
-      <button class="nav-item" data-page="templates"><span>▱</span> Шаблоны</button>
     </nav>
     <div class="side-section"><small>МОИ ПРОЕКТЫ</small><div id="side-projects"></div></div>
     <button class="nav-item settings" data-page="settings"><span>⚙</span> Настройки</button>
@@ -64,8 +63,11 @@
         <label>Начало<input name="time" type="time"></label>
         <label>Окончание<input name="end_time" type="time"></label>
         <label>Длительность<select name="duration"><option value="30">30 минут</option><option value="60" selected>1 час</option><option value="90">1,5 часа</option><option value="120">2 часа</option><option value="180">3 часа</option></select></label>
+        <label>Дата дедлайна<input name="deadline_date" type="date"></label>
+        <label>Время дедлайна<input name="deadline_time" type="time"><small>Без времени — до конца дня</small></label>
+        <label>После дедлайна<select name="deadline_action"><option value="none">Ничего не делать</option><option value="mark_overdue">Отметить просроченной</option><option value="auto_complete">Завершить автоматически</option></select></label>
         <label>Приоритет<select name="priority"><option value="P1">Критично</option><option value="P2">Важно</option><option value="P3" selected>Обычно</option><option value="P4">Не очень важно</option></select></label>
-        <label>Статус<select name="status"><option value="idea">Идеи</option><option value="planned" selected>Запланировано</option><option value="in_progress">В работе</option><option value="completed">Готово</option></select></label>
+        <label>Статус<select name="status"><option value="idea">Идеи</option><option value="planned" selected>Запланировано</option><option value="in_progress">В работе</option><option value="completed">Готово</option><option value="cancelled">Отменено</option></select></label>
         <label>Проект<select name="project" id="project-select"></select></label>
         <label>Колонка<select name="column"><option>Идеи</option><option>Запланировано</option><option>В работе</option><option>Готово</option></select></label>
         <label>Исполнитель<select name="assignee"><option value="">Не назначен</option></select></label>
@@ -74,6 +76,7 @@
       <label>Описание<textarea name="description" rows="3" placeholder="Детали, ссылки и заметки"></textarea></label>
       <label>Теги<input name="tags" placeholder="Через запятую"></label>
       <div class="form-grid"><label>Повторение<select name="recurrence"><option value="">Не повторять</option><option value="DAILY">Каждый день</option><option value="WEEKDAYS">По рабочим дням</option><option value="WEEKLY">Каждую неделю</option><option value="MONTHLY">Каждый месяц</option><option value="YEARLY">Каждый год</option></select></label><label>Напоминание<select name="reminder"><option value="">Без напоминания</option><option value="15">За 15 минут</option><option value="30">За 30 минут</option><option value="60">За час</option><option value="1440">За сутки</option></select></label></div>
+      <label class="task-template-field">Шаблон<select name="template_choice" id="task-template-choice"><option value="">Без шаблона</option><option value="__create__">Создать новый…</option></select><small>Шаблон сохраняет все заполненные параметры карточки</small></label>
       <div class="modal-actions"><button type="button" class="danger hidden" id="delete-task">Удалить</button><span class="spacer"></span><button type="button" class="secondary" data-close>Отмена</button><button class="primary">Сохранить задачу</button></div>
     </form>
   </div>
@@ -85,7 +88,7 @@
     </form>
   </div>
   <div id="toast"></div>
-  <script type="module" src="app.js?v=5.3"></script>
+  <script type="module" src="app.js?v=6.0"></script>
   <script>if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js')</script>
 </body>
 </html>

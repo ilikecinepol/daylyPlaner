@@ -1,18 +1,21 @@
-import os
+import os,asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from fastapi import FastAPI, Depends, HTTPException, Request, Response, Query
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 from .database import Base,engine,get_db
 from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage,FriendRole,ContactFriendRole,ProjectRoleRule,ChannelRoleRule
-from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,FriendRoleIn,RoleRuleIn
+from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ProjectDeleteIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,FriendRoleIn,RoleRuleIn,ArchiveSettings,NotificationSettingsIn
 from .security import hash_password,verify_password
 from .services.recurrence import next_occurrence
-from .services.notifications import due_reminders
+from .services.notifications import due_reminders,filter_notification_feed,notification_settings
 from .services.bootstrap import initialize_database
+from .services.scheduling import is_overdue, normalize_schedule
+from .services.realtime import revision as realtime_revision
 from .api.dependencies import set_session_cookie as cookie,current_user,iso_utc as dt
 from .api.integrations import router as integrations_router
 
@@ -52,7 +55,7 @@ def channel_permission(db,channel,user,permission):
     contact=db.scalar(select(Contact).where(Contact.owner_user_id==p.user_id,Contact.contact_user_id==user.id,Contact.status=="accepted"));role_ids=list(db.scalars(select(ContactFriendRole.role_id).where(ContactFriendRole.contact_id==contact.id))) if contact else []
     denied={value for rule in db.scalars(select(ChannelRoleRule).where(ChannelRoleRule.channel_id==channel.id,ChannelRoleRule.role_id.in_(role_ids))) for value in (rule.denied_permissions or [])} if role_ids else set()
     if permission in denied:raise HTTPException(403,"Доступ к каналу запрещён ролью")
-def accessible_projects(db,user):return list(db.scalars(select(ProjectMember.project_id).where(ProjectMember.user_id==user.id)))
+def accessible_projects(db,user):return list(db.scalars(select(ProjectMember.project_id).join(Project,Project.id==ProjectMember.project_id).where(ProjectMember.user_id==user.id,Project.deleted_at==None)))
 def set_member_roles(db,member,role_ids):
     found={r.id:r for r in db.scalars(select(ProjectRole).where(ProjectRole.id.in_(role_ids),ProjectRole.project_id==member.project_id))} if role_ids else {};roles=[found[x] for x in dict.fromkeys(role_ids) if x in found]
     if not roles:raise HTTPException(400,"Нужно назначить хотя бы одну роль")
@@ -96,7 +99,7 @@ def sync_task_workflow(db,task,actor,status_changed=False,column_changed=False):
     elif status_changed:task.completed_at=None
 def task_out(db,t):
     reminders=list(db.scalars(select(Reminder).where(Reminder.task_id==t.id)))
-    return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"assigned_to_id":t.assigned_to_id,"assignee":user_brief(db,t.assigned_to_id),"started_by":user_brief(db,t.started_by_id),"completed_by":user_brief(db,t.completed_by_id),"start_at":dt(t.start_at),"due_at":dt(t.due_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
+    return {"id":t.id,"title":t.title,"description":t.description,"status":t.status,"priority":t.priority,"project_id":t.project_id,"column_id":t.column_id,"assigned_to_id":t.assigned_to_id,"assignee":user_brief(db,t.assigned_to_id),"started_by":user_brief(db,t.started_by_id),"completed_by":user_brief(db,t.completed_by_id),"start_at":dt(t.start_at),"end_at":dt(t.end_at),"deadline_at":dt(t.deadline_at),"deadline_action":t.deadline_action or "none","deadline_processed_at":dt(t.deadline_processed_at),"due_at":dt(t.end_at),"duration_minutes":t.duration_minutes,"all_day":t.all_day,"is_overdue":is_overdue(t),"location":t.location,"tags":t.tags or [],"mentions":t.mentions or [],"recurrence_rule":t.recurrence_rule or "","reminder_offsets":[r.offset_minutes for r in reminders],"completed_at":dt(t.completed_at),"archived_at":dt(t.archived_at),"sync_version":t.sync_version,"created_at":dt(t.created_at),"updated_at":dt(t.updated_at)}
 def project_out(db,p):
     roles=list(db.scalars(select(ProjectRole).where(ProjectRole.project_id==p.id).order_by(ProjectRole.position)));members=[]
     for m in db.scalars(select(ProjectMember).where(ProjectMember.project_id==p.id)):
@@ -126,12 +129,23 @@ def login(c:Credentials,response:Response,db:Session=Depends(get_db)):
     cookie(response,u.id);return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone}
 @app.post("/api/v1/auth/logout",status_code=204)
 def logout(response:Response): response.delete_cookie("plan_session",path="/")
+def user_out(u):return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone,"completed_task_archive_policy":u.completed_task_archive_policy or "never","completed_task_archive_days":u.completed_task_archive_days or 7,"notification_settings":notification_settings(u),"notifications_cleared_at":dt(u.notifications_cleared_at)}
 @app.get("/api/v1/auth/me")
-def me(u=Depends(current_user)): return {"id":u.id,"email":u.email,"nickname":u.nickname,"name":u.name,"timezone":u.timezone}
+def me(u=Depends(current_user)): return user_out(u)
+@app.patch("/api/v1/auth/archive-settings")
+def archive_settings(data:ArchiveSettings,u=Depends(current_user),db:Session=Depends(get_db)):
+    u.completed_task_archive_policy=data.policy;u.completed_task_archive_days=data.days;db.commit();return user_out(u)
+@app.patch("/api/v1/auth/notification-settings")
+def save_notification_settings(data:NotificationSettingsIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    allowed=set(notification_settings(u));u.notification_settings={key:value.model_dump() for key,value in data.rules.items() if key in allowed};db.commit();return user_out(u)
+@app.post("/api/v1/notifications/clear",status_code=204)
+def clear_notifications(u=Depends(current_user),db:Session=Depends(get_db)):
+    u.notifications_cleared_at=datetime.now(timezone.utc);db.commit()
 
 @app.get("/api/v1/tasks")
-def tasks(q:str|None=None,status:str|None=None,priority:str|None=None,project:str|None=None,from_:datetime|None=Query(None,alias="from"),to:datetime|None=None,u=Depends(current_user),db:Session=Depends(get_db)):
+def tasks(q:str|None=None,status:str|None=None,priority:str|None=None,project:str|None=None,from_:datetime|None=Query(None,alias="from"),to:datetime|None=None,include_archived:bool=False,u=Depends(current_user),db:Session=Depends(get_db)):
     shared=accessible_projects(db,u);s=select(Task).where(or_(Task.user_id==u.id,Task.project_id.in_(shared)),Task.deleted_at==None)
+    if not include_archived:s=s.where(Task.archived_at==None)
     if q:s=s.where(or_(Task.title.ilike(f"%{q}%"),Task.description.ilike(f"%{q}%"),Task.location.ilike(f"%{q}%")))
     if status:s=s.where(Task.status==status)
     if priority:s=s.where(Task.priority==priority)
@@ -142,7 +156,7 @@ def tasks(q:str|None=None,status:str|None=None,priority:str|None=None,project:st
 @app.post("/api/v1/tasks",status_code=201)
 def create_task(data:TaskIn,u=Depends(current_user),db:Session=Depends(get_db)):
     if data.project_id:membership(db,data.project_id,u,"edit_tasks")
-    validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=data.model_dump(exclude={"reminder_offsets"});t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
+    validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=normalize_schedule(data.model_dump(exclude={"reminder_offsets"}));t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
     db.add(t);db.flush();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in data.reminder_offsets];log(db,u,"task_created",t.id);db.commit();return task_out(db,t)
 @app.get("/api/v1/tasks/{task_id}")
 def get_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
@@ -156,16 +170,18 @@ def patch_task(task_id:str,data:TaskPatch,u=Depends(current_user),db:Session=Dep
     if t.project_id:
         if db.get(Project,t.project_id).user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
     elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
-    patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None)
+    patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None);deadline_changed=bool({"deadline_at","deadline_action"}&set(patch))
     if expected is not None and expected!=t.sync_version: raise HTTPException(409,"Задача была изменена на другом устройстве")
-    offsets=patch.pop("reminder_offsets",None);before={k:getattr(t,k) for k in patch}
+    offsets=patch.pop("reminder_offsets",None);patch=normalize_schedule(patch,t)
+    if deadline_changed:patch["deadline_processed_at"]=None
+    before={k:getattr(t,k) for k in patch}
     validate_assignee(db,patch.get("project_id",t.project_id),patch.get("assigned_to_id",t.assigned_to_id),u.id)
     for k,v in patch.items(): setattr(t,k,v)
     sync_task_workflow(db,t,u,status_changed="status" in patch,column_changed="column_id" in patch and "status" not in patch)
     if "status" in patch and patch["status"]=="completed":
         nxt=next_occurrence(t.start_at,t.recurrence_rule)
         if nxt and not db.scalar(select(Task).where(Task.user_id==u.id,Task.title==t.title,Task.start_at==nxt,Task.deleted_at==None)):
-            child=Task(user_id=u.id,project_id=t.project_id,column_id=t.column_id,title=t.title,description=t.description,status="planned",priority=t.priority,start_at=nxt,due_at=(t.due_at+(nxt-t.start_at)) if t.due_at else None,duration_minutes=t.duration_minutes,all_day=t.all_day,location=t.location,tags=t.tags,mentions=t.mentions,recurrence_rule=t.recurrence_rule);db.add(child);db.flush();[db.add(Reminder(task_id=child.id,offset_minutes=r.offset_minutes,channel=r.channel)) for r in db.scalars(select(Reminder).where(Reminder.task_id==t.id))]
+            shift=nxt-t.start_at;child=Task(user_id=u.id,project_id=t.project_id,column_id=t.column_id,title=t.title,description=t.description,status="planned",priority=t.priority,start_at=nxt,end_at=(t.end_at+shift) if t.end_at else None,deadline_at=(t.deadline_at+shift) if t.deadline_at else None,deadline_action=t.deadline_action,duration_minutes=t.duration_minutes,all_day=t.all_day,location=t.location,tags=t.tags,mentions=t.mentions,recurrence_rule=t.recurrence_rule);db.add(child);db.flush();[db.add(Reminder(task_id=child.id,offset_minutes=r.offset_minutes,channel=r.channel)) for r in db.scalars(select(Reminder).where(Reminder.task_id==t.id))]
     t.sync_version=(t.sync_version or 0)+1
     if offsets is not None:db.query(Reminder).filter(Reminder.task_id==t.id).delete();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in offsets]
     log(db,u,"task_updated",t.id,{k:[str(before[k]),str(v)] for k,v in patch.items() if before[k]!=v});db.commit();return task_out(db,t)
@@ -178,9 +194,43 @@ def delete_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
     t.deleted_at=datetime.now(timezone.utc);t.sync_version+=1;log(db,u,"task_deleted",t.id);db.commit()
 
+def archive_task_access(db,task_id,u):
+    t=db.get(Task,task_id)
+    if not t or t.deleted_at:raise HTTPException(404,"Задача не найдена")
+    if t.project_id:
+        if db.get(Project,t.project_id).user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
+    elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
+    return t
+@app.post("/api/v1/tasks/{task_id}/archive")
+def archive_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    t=archive_task_access(db,task_id,u)
+    if t.status not in {"completed","cancelled"}:raise HTTPException(409,"Архивировать можно только завершённую или отменённую задачу")
+    if not t.archived_at:t.archived_at=datetime.now(timezone.utc);t.sync_version=(t.sync_version or 0)+1;log(db,u,"task_archived",t.id);db.commit()
+    return task_out(db,t)
+@app.post("/api/v1/tasks/{task_id}/restore")
+def restore_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    t=archive_task_access(db,task_id,u)
+    if t.archived_at:t.archived_at=None;t.sync_version=(t.sync_version or 0)+1;log(db,u,"task_restored",t.id);db.commit()
+    return task_out(db,t)
+@app.post("/api/v1/tasks/{task_id}/assign-self")
+def assign_task_to_self(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
+    t=db.get(Task,task_id)
+    if not t or t.deleted_at or t.archived_at or not t.project_id:raise HTTPException(404,"Проектная задача не найдена")
+    p=membership(db,t.project_id,u,"edit_tasks")
+    if t.status in {"completed","cancelled"}:raise HTTPException(409,"Завершённую задачу нельзя назначить")
+    if t.assigned_to_id and t.assigned_to_id!=u.id:raise HTTPException(409,"У задачи уже есть исполнитель")
+    if t.assigned_to_id==u.id:return task_out(db,t)
+    t.assigned_to_id=u.id;t.sync_version=(t.sync_version or 0)+1
+    recipients={p.user_id}
+    admin_roles=list(db.scalars(select(ProjectRole.id).where(ProjectRole.project_id==p.id,ProjectRole.name.in_(["Владелец","Администратор"]))))
+    if admin_roles:
+        recipients.update(db.scalars(select(ProjectMember.user_id).join(ProjectMemberRole,ProjectMemberRole.member_id==ProjectMember.id).where(ProjectMember.project_id==p.id,ProjectMemberRole.role_id.in_(admin_roles))))
+    for recipient in recipients-{u.id}:db.add(ActivityLog(user_id=recipient,task_id=t.id,action="notification_task_self_assigned",changes={"actor_id":u.id,"actor_name":u.name,"task_title":t.title,"project_id":p.id,"project_name":p.name}))
+    log(db,u,"task_self_assigned",t.id,{"project_id":p.id});db.commit();return task_out(db,t)
+
 @app.get("/api/v1/calendar")
 def calendar(from_:datetime=Query(alias="from"),to:datetime=Query(),u=Depends(current_user),db:Session=Depends(get_db)):
-    return [task_out(db,t) for t in db.scalars(select(Task).where(Task.user_id==u.id,Task.deleted_at==None,Task.start_at>=from_,Task.start_at<=to).order_by(Task.start_at))]
+    return [task_out(db,t) for t in db.scalars(select(Task).where(Task.user_id==u.id,Task.deleted_at==None,Task.archived_at==None,Task.start_at>=from_,Task.start_at<=to).order_by(Task.start_at))]
 
 @app.get("/api/v1/projects")
 def projects(u=Depends(current_user),db:Session=Depends(get_db)): return [project_out(db,p) for p in db.scalars(select(Project).where(Project.id.in_(accessible_projects(db,u)),Project.deleted_at==None))]
@@ -191,7 +241,18 @@ def create_project(data:ProjectIn,u=Depends(current_user),db:Session=Depends(get
 def patch_project(project_id:str,data:ProjectIn,u=Depends(current_user),db:Session=Depends(get_db)):
     p=own(db,Project,project_id,u);[setattr(p,k,v) for k,v in data.model_dump().items()];sync_team_label(db,p);db.commit();return project_out(db,p)
 @app.delete("/api/v1/projects/{project_id}",status_code=204)
-def delete_project(project_id:str,u=Depends(current_user),db:Session=Depends(get_db)):p=own(db,Project,project_id,u);p.deleted_at=datetime.now(timezone.utc);db.commit()
+def delete_project(project_id:str,u=Depends(current_user),db:Session=Depends(get_db)):delete_project_with_policy(project_id,ProjectDeleteIn(),u,db)
+@app.post("/api/v1/projects/{project_id}/delete")
+def delete_project_with_policy(project_id:str,data:ProjectDeleteIn,u=Depends(current_user),db:Session=Depends(get_db)):
+    p=own(db,Project,project_id,u);now=datetime.now(timezone.utc);affected=0
+    for task in db.scalars(select(Task).where(Task.project_id==p.id,Task.deleted_at==None)):
+        if data.task_policy=="keep":
+            task.project_id=None;task.column_id=None
+            if task.assigned_to_id!=task.user_id:task.assigned_to_id=None
+        elif data.task_policy=="archive":task.archived_at=task.archived_at or now
+        else:task.deleted_at=now
+        task.sync_version=(task.sync_version or 0)+1;log(db,u,f"project_deleted_task_{data.task_policy}",task.id,{"project_id":p.id});affected+=1
+    p.deleted_at=now;db.commit();return {"id":p.id,"task_policy":data.task_policy,"affected_tasks":affected}
 @app.post("/api/v1/projects/{project_id}/columns",status_code=201)
 def create_column(project_id:str,data:ColumnIn,u=Depends(current_user),db:Session=Depends(get_db)):
     p=membership(db,project_id,u,"manage_channels");pos=data.position if data.position is not None else db.scalar(select(func.count()).select_from(KanbanColumn).where(KanbanColumn.project_id==p.id));c=KanbanColumn(project_id=p.id,name=data.name,position=pos);db.add(c);db.commit();return {"id":c.id,"name":c.name,"position":c.position}
@@ -202,7 +263,7 @@ def patch_column(column_id:str,data:ColumnIn,u=Depends(current_user),db:Session=
     c.name=data.name;c.position=data.position if data.position is not None else c.position;db.commit();return {"id":c.id,"name":c.name,"position":c.position}
 
 @app.get("/api/v1/templates")
-def templates(u=Depends(current_user),db:Session=Depends(get_db)):return [{"id":t.id,"name":t.name,"icon":t.icon,"description":t.description,"duration":t.duration,"priority":t.priority,"location":t.location,"project_id":t.project_id,"reminders":t.reminders or []} for t in db.scalars(select(TaskTemplate).where(TaskTemplate.user_id==u.id,TaskTemplate.deleted_at==None))]
+def templates(u=Depends(current_user),db:Session=Depends(get_db)):return [{"id":t.id,"name":t.name,"icon":t.icon,"description":t.description,"duration":t.duration,"priority":t.priority,"location":t.location,"project_id":t.project_id,"reminders":t.reminders or [],"task_data":t.task_data or {"title":t.name,"description":t.description,"duration_minutes":t.duration,"priority":t.priority,"location":t.location,"project_id":t.project_id,"reminder_offsets":t.reminders or []}} for t in db.scalars(select(TaskTemplate).where(TaskTemplate.user_id==u.id,TaskTemplate.deleted_at==None))]
 @app.post("/api/v1/templates",status_code=201)
 def create_template(data:TemplateIn,u=Depends(current_user),db:Session=Depends(get_db)):t=TaskTemplate(user_id=u.id,**data.model_dump());db.add(t);db.commit();return {"id":t.id,**data.model_dump()}
 @app.get("/api/v1/activity")
@@ -218,8 +279,17 @@ def notification_feed(u=Depends(current_user),db:Session=Depends(get_db)):
     for request in db.scalars(select(Contact).where(Contact.owner_user_id==u.id,Contact.status.in_(["pending","accepted","rejected"])).order_by(Contact.created_at.desc())):
         person=db.get(User,request.contact_user_id);labels={"pending":"ожидает ответа","accepted":"принята","rejected":"отклонена"};result.append({"id":"friend-out-"+request.id,"type":"friend_outgoing","title":f"Заявка для @{person.nickname}: {labels[request.status]}","status":request.status,"created_at":dt(request.created_at)})
     for task in db.scalars(select(Task).where(Task.assigned_to_id==u.id,Task.user_id!=u.id,Task.deleted_at==None).order_by(Task.updated_at.desc()).limit(50)):
+        if db.scalar(select(ActivityLog.id).where(ActivityLog.user_id==u.id,ActivityLog.task_id==task.id,ActivityLog.action=="task_self_assigned")):continue
         author=db.get(User,task.user_id);result.append({"id":"task-"+task.id,"type":"task_assigned","title":f"{author.name} назначил вам задачу «{task.title}»","task_id":task.id,"created_at":dt(task.updated_at)})
-    return sorted(result,key=lambda x:x["created_at"] or "",reverse=True)
+    for item in db.scalars(select(ActivityLog).where(ActivityLog.user_id==u.id,ActivityLog.action=="notification_task_self_assigned").order_by(ActivityLog.created_at.desc()).limit(50)):
+        changes=item.changes or {};result.append({"id":"self-assigned-"+item.id,"type":"task_self_assigned","title":f"{changes.get('actor_name','Участник')} назначил себя на задачу «{changes.get('task_title','')}» в проекте «{changes.get('project_name','')}»","task_id":item.task_id,"project_id":changes.get("project_id"),"created_at":dt(item.created_at)})
+    now=datetime.now(timezone.utc);shared=accessible_projects(db,u)
+    relevant=or_(Task.user_id==u.id,Task.assigned_to_id==u.id,Task.project_id.in_(shared))
+    for task in db.scalars(select(Task).where(relevant,Task.deadline_at!=None,Task.deadline_at>now,Task.deadline_at<=now+timedelta(minutes=15),Task.status.notin_(["completed","cancelled"]),Task.deleted_at==None,Task.archived_at==None)):
+        result.append({"id":"deadline-"+task.id,"type":"deadline_soon","title":f"До дедлайна задачи «{task.title}» осталось менее 15 минут","task_id":task.id,"created_at":dt(task.deadline_at-timedelta(minutes=15))})
+    for task in db.scalars(select(Task).where(relevant,Task.priority=="P1",Task.status.notin_(["completed","cancelled"]),Task.deleted_at==None,Task.archived_at==None).order_by(Task.updated_at.desc()).limit(20)):
+        result.append({"id":"urgent-"+task.id,"type":"urgent_task","title":f"Срочная задача: «{task.title}»","task_id":task.id,"created_at":dt(task.updated_at)})
+    return sorted(filter_notification_feed(u,result),key=lambda x:x["created_at"] or "",reverse=True)
 
 @app.get("/api/v1/contacts")
 def contacts(u=Depends(current_user),db:Session=Depends(get_db)):
@@ -386,5 +456,18 @@ def send_message(channel_id:str,data:MessageIn,u=Depends(current_user),db:Sessio
     m=ChatMessage(channel_id=channel_id,user_id=u.id,content=data.content.strip(),attached_task_id=data.attached_task_id);db.add(m);db.commit();return {"id":m.id,"content":m.content,"created_at":dt(m.created_at),"author":{"id":u.id,"name":u.name},"task":{"id":task.id,"title":task.title,"priority":task.priority,"status":task.status} if task else None}
 @app.get("/api/v1/health")
 def health():return {"status":"ok","database":engine.dialect.name}
+
+@app.get("/api/v1/events")
+async def events(request:Request,u=Depends(current_user)):
+    async def stream():
+        previous=None
+        yield "event: ready\ndata: connected\n\n"
+        while not await request.is_disconnected():
+            with Session(engine) as db:current=realtime_revision(db,u.id)
+            if previous is not None and current!=previous:yield "event: change\ndata: updated\n\n"
+            else:yield ": heartbeat\n\n"
+            previous=current
+            await asyncio.sleep(2)
+    return StreamingResponse(stream(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
 
 root=Path(__file__).resolve().parents[2];app.mount("/",StaticFiles(directory=root,html=True),name="frontend")

@@ -2,10 +2,10 @@ from sqlalchemy import inspect, text
 from .database import engine
 
 SQLITE_COLUMNS={
- "users":{"updated_at":"DATETIME","deleted_at":"DATETIME","nickname":"VARCHAR(40)"},
+ "users":{"updated_at":"DATETIME","deleted_at":"DATETIME","nickname":"VARCHAR(40)","completed_task_archive_policy":"VARCHAR(30) DEFAULT 'never'","completed_task_archive_days":"INTEGER DEFAULT 7","notification_settings":"JSON DEFAULT '{}'","notifications_cleared_at":"DATETIME"},
  "projects":{"updated_at":"DATETIME","deleted_at":"DATETIME","team_label":"VARCHAR(100) DEFAULT ''","priority":"VARCHAR(2) DEFAULT 'P3'"},
- "tasks":{"column_id":"VARCHAR(36)","start_at":"DATETIME","due_at":"DATETIME","duration_minutes":"INTEGER DEFAULT 60","all_day":"BOOLEAN DEFAULT 0","mentions":"JSON DEFAULT '[]'","recurrence_rule":"VARCHAR(300) DEFAULT ''","completed_at":"DATETIME","sync_version":"INTEGER DEFAULT 1"},
- "task_templates":{"project_id":"VARCHAR(36)","reminders":"JSON DEFAULT '[]'","created_at":"DATETIME","updated_at":"DATETIME","deleted_at":"DATETIME"},
+ "tasks":{"column_id":"VARCHAR(36)","start_at":"DATETIME","due_at":"DATETIME","end_at":"DATETIME","deadline_at":"DATETIME","deadline_action":"VARCHAR(30) DEFAULT 'none'","deadline_processed_at":"DATETIME","duration_minutes":"INTEGER DEFAULT 60","all_day":"BOOLEAN DEFAULT 0","mentions":"JSON DEFAULT '[]'","recurrence_rule":"VARCHAR(300) DEFAULT ''","completed_at":"DATETIME","archived_at":"DATETIME","sync_version":"INTEGER DEFAULT 1"},
+ "task_templates":{"project_id":"VARCHAR(36)","reminders":"JSON DEFAULT '[]'","task_data":"JSON DEFAULT '{}'","created_at":"DATETIME","updated_at":"DATETIME","deleted_at":"DATETIME"},
  "contacts":{"tags":"JSON DEFAULT '[]'"}
 }
 def migrate_legacy():

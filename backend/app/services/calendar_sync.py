@@ -16,6 +16,10 @@ def event_start(event):
     start=event.get("start",{});value=start.get("dateTime") or start.get("date")
     return (datetime.fromisoformat(value.replace("Z","+00:00")) if value else None),"date" in start
 
+def event_end(event):
+    end=event.get("end",{});value=end.get("dateTime") or end.get("date")
+    return datetime.fromisoformat(value.replace("Z","+00:00")) if value else None
+
 def access_token(connection):
     expires=aware(connection.token_expires_at)
     if expires and expires>datetime.now(timezone.utc)+timedelta(seconds=60):return google.decrypt(connection.access_token_encrypted)
@@ -32,10 +36,13 @@ def access_token(connection):
 def payload(task):
     start=aware(task.start_at);event={"summary":task.title,"description":task.description,"location":task.location,"extendedProperties":{"private":{"plan_task_id":task.id}}}
     if task.all_day:return event|{"start":{"date":start.date().isoformat()},"end":{"date":(start.date()+timedelta(days=1)).isoformat()}}
-    return event|{"start":{"dateTime":start.isoformat()},"end":{"dateTime":(start+timedelta(minutes=task.duration_minutes)).isoformat()}}
+    end=aware(task.end_at) or start+timedelta(minutes=task.duration_minutes)
+    return event|{"start":{"dateTime":start.isoformat()},"end":{"dateTime":end.isoformat()}}
 
 def apply_remote(task,event):
-    start,all_day=event_start(event);task.start_at=start;task.all_day=all_day;task.title=event.get("summary") or task.title;task.description=event.get("description",task.description);task.location=event.get("location",task.location);task.sync_version=(task.sync_version or 0)+1
+    start,all_day=event_start(event);end=event_end(event);task.start_at=start;task.end_at=None if all_day else end;task.all_day=all_day
+    if start and end and not all_day:task.duration_minutes=max(0,round((end-start).total_seconds()/60))
+    task.title=event.get("summary") or task.title;task.description=event.get("description",task.description);task.location=event.get("location",task.location);task.sync_version=(task.sync_version or 0)+1
 
 def save_external(db,connection,event):
     item=db.scalar(select(ExternalCalendarEvent).where(ExternalCalendarEvent.calendar_connection_id==connection.id,ExternalCalendarEvent.external_event_id==event["id"])) or ExternalCalendarEvent(calendar_connection_id=connection.id,external_event_id=event["id"])
