@@ -257,7 +257,11 @@ def calendar(from_:datetime=Query(alias="from"),to:datetime=Query(),u=Depends(cu
 def projects(u=Depends(current_user),db:Session=Depends(get_db)): return [project_out(db,p) for p in db.scalars(select(Project).where(Project.id.in_(accessible_projects(db,u)),Project.deleted_at==None))]
 @app.post("/api/v1/projects",status_code=201)
 def create_project(data:ProjectIn,u=Depends(current_user),db:Session=Depends(get_db)):
-    p=Project(user_id=u.id,**data.model_dump());db.add(p);db.flush();[db.add(KanbanColumn(project_id=p.id,name=n,position=i)) for i,n in enumerate(["Идеи","Запланировано","В работе","Готово"])];roles=[ProjectRole(project_id=p.id,name=n,color=c,permissions=perms,position=i) for i,(n,c,perms) in enumerate([("Владелец","#ff6b45",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Администратор","#e59b35",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Участник","#5577e7",["view","edit_tasks","send_messages"]),("Наблюдатель","#7b818b",["view"])])];db.add_all(roles);db.flush();admin=next(r for r in roles if r.name=="Администратор");owner=ProjectMember(project_id=p.id,user_id=u.id,role_id=admin.id);db.add(owner);db.flush();db.add(ProjectMemberRole(member_id=owner.id,role_id=admin.id));db.add(ChatChannel(project_id=p.id,name="общий",description="Основной канал проекта",position=0));sync_team_label(db,p);db.commit();return project_out(db,p)
+    return create_project_service(data,u,db)
+
+def create_project_service(data,u,db,commit=True):
+    p=Project(user_id=u.id,**data.model_dump());db.add(p);db.flush();[db.add(KanbanColumn(project_id=p.id,name=n,position=i)) for i,n in enumerate(["Идеи","Запланировано","В работе","Готово"])]
+    roles=[ProjectRole(project_id=p.id,name=n,color=c,permissions=perms,position=i) for i,(n,c,perms) in enumerate([("Владелец","#ff6b45",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Администратор","#e59b35",["view","edit_tasks","send_messages","manage_channels","manage_members"]),("Участник","#5577e7",["view","edit_tasks","send_messages"]),("Наблюдатель","#7b818b",["view"])])];db.add_all(roles);db.flush();admin=next(r for r in roles if r.name=="Администратор");owner=ProjectMember(project_id=p.id,user_id=u.id,role_id=admin.id);db.add(owner);db.flush();db.add(ProjectMemberRole(member_id=owner.id,role_id=admin.id));db.add(ChatChannel(project_id=p.id,name="общий",description="Основной канал проекта",position=0));sync_team_label(db,p);db.commit() if commit else db.flush();return project_out(db,p)
 @app.patch("/api/v1/projects/{project_id}")
 def patch_project(project_id:str,data:ProjectIn,u=Depends(current_user),db:Session=Depends(get_db)):
     p=own(db,Project,project_id,u);[setattr(p,k,v) for k,v in data.model_dump().items()];sync_team_label(db,p);db.commit();return project_out(db,p)
@@ -499,5 +503,9 @@ async def events(request:Request,u=Depends(current_user)):
             previous=current
             await asyncio.sleep(2)
     return StreamingResponse(stream(),media_type="text/event-stream",headers={"Cache-Control":"no-cache","X-Accel-Buffering":"no"})
+
+from .ai.router import make_router as make_ai_router
+from .ai.gateway import PlannerGateway
+app.include_router(make_ai_router(PlannerGateway(membership,create_task_service,patch_task_service,create_project_service)))
 
 root=Path(__file__).resolve().parents[2];app.mount("/",StaticFiles(directory=root,html=True),name="frontend")

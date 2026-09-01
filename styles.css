@@ -38,5 +38,17 @@ body[data-theme="midnight"]{--bg:#151a24;--panel:#1d2431;--ink:#f3f5fa;--muted:#
 .goal-card progress{width:min(65%,360px);accent-color:var(--accent,#ff6b45)}
 .goal-why,#task-goal-why{white-space:pre-wrap;overflow-wrap:anywhere}
 .goal-card h2{overflow-wrap:anywhere}
+/* Optional AI module */
+.ai-toolbar{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}.ai-toolbar label{display:grid;gap:6px}
+.ai-history{max-height:55vh;overflow:auto}.ai-turn{padding:16px 0;border-bottom:1px solid var(--border,#ddd)}
+.ai-user,.ai-answer{white-space:pre-wrap;overflow-wrap:anywhere}.ai-user{opacity:.8}
+.ai-proposal{border:1px solid var(--border,#ddd);border-radius:12px;padding:16px;margin:12px 0;overflow-x:auto}
+.ai-project-plan fieldset{border:1px solid var(--border,#ddd);border-radius:12px;margin:12px 0;padding:12px}.ai-project-plan legend{font-weight:700;padding:0 6px}.ai-project-plan textarea{min-height:70px}.ai-project-plan .ai-toolbar{align-items:end}
+.ai-proposal table{width:100%;border-collapse:collapse;margin:12px 0}.ai-proposal td,.ai-proposal th{text-align:left;padding:8px;overflow-wrap:anywhere;max-width:280px}
+#ai-chat-form textarea{width:100%;box-sizing:border-box;margin:8px 0}
+#ai-panel input,#ai-panel select,#ai-panel textarea{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--panel);color:var(--ink);max-width:100%}
+#ai-panel .meta{font-size:12px;line-height:1.6;color:var(--muted)}
+#ai-panel button:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+#ai-panel .ai-proposal{border-color:var(--line);background:var(--panel)}
 .template-choice-row{display:flex;gap:8px;align-items:center}.template-choice-row select{flex:1}.template-choice-row button{white-space:nowrap}
 .task-row.postponed .check{border-color:#9b6bd3;color:#7a47b2;background:#f7f0ff}.postponed-meta{color:#7a47b2;font-weight:700}.postponed-card{margin-bottom:22px;border-color:#d9c4ee;background:color-mix(in srgb,#f4eaff 72%,var(--panel))}.postponed-card .card-title{color:#6f3da4;margin-bottom:6px}.postponed-hint{font-size:12px;color:var(--muted);margin:0 0 10px}

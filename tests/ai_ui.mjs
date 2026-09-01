@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+globalThis.document={addEventListener(){}};
+const {proposalHTML,answerHTML}=await import('../frontend/js/ai.js');
+const html=proposalHTML({id:'p1',kind:'create_task',status:'pending',before:{},changes:{title:'<script>bad</script>',start_at:null}});
+assert.ok(html.includes('&lt;script&gt;bad&lt;/script&gt;'));
+assert.ok(!html.includes('<script>'));
+assert.ok(html.includes('data-ai-action="confirm"'));
+assert.ok(!proposalHTML({id:'p1',kind:'create_task',status:'applied',before:{},changes:{title:'Done'}}).includes('data-ai-action="confirm"'));
+const answer=answerHTML({prompt:'<img src=x>',answer:'<script>bad</script>',sources:[{id:'t1',title:'<task>'}],proposals:[]});
+assert.ok(!answer.includes('<img'));
+assert.ok(answer.includes('&lt;task&gt;'));
+console.log('AI UI escaping and confirmation checks passed');

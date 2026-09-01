@@ -6,6 +6,8 @@
 
 ## Frontend
 
+AI Agent V1 выделен в `backend/app/ai/` и `frontend/js/ai.js`; платёжных функций нет. Модуль подключается флагом, имеет собственные таблицы доступа, диалогов, предложений и квот (миграция `0015_ai_module`). AI вызывает существующие сервисы задач через ограниченный адаптер только после подтверждения. Подробности запуска, границ данных, demo-режима и подключения реального провайдера: [AI_MODULE.md](docs/AI_MODULE.md).
+
 Vanilla HTML/CSS/JavaScript и service worker. `app.js` — единственная активная точка входа. Клиент общается через `/api/v1`, хранит даты в UTC ISO 8601 и сохраняет путь к PWA и оболочкам Tauri. Следующий рефакторинг — выделение `api`, `auth`, `calendar`, `tasks`, `kanban`, `chat`, `integrations` и `ui` в ES modules.
 
 ## Backend и Database
