@@ -129,3 +129,16 @@ def test_task_assignee_notifications_and_kanban_status_sync():
         feed=c.get("/api/v1/notifications/feed").json();assert any(x["type"]=="task_assigned" and x["task_id"]==task["id"] for x in feed)
         working=c.patch(f'/api/v1/tasks/{task["id"]}',json={"status":"in_progress","sync_version":task["sync_version"]}).json();assert working["started_by"]["id"]==member["id"];assert working["column_id"]==next(x for x in project["columns"] if x["name"]=="В работе")["id"]
         done=c.patch(f'/api/v1/tasks/{task["id"]}',json={"status":"completed","sync_version":working["sync_version"]}).json();assert done["completed_by"]["id"]==member["id"];assert done["column_id"]==next(x for x in project["columns"] if x["name"]=="Готово")["id"]
+
+def test_task_can_be_postponed_with_or_without_a_new_date():
+    with TestClient(app) as c:
+        c.post("/api/v1/auth/register",json={"email":"postpone@example.com","password":"StrongPass123","name":"Postpone"})
+        task=c.post("/api/v1/tasks",json={"title":"Отложить","start_at":"2026-09-01T10:00:00Z"}).json()
+        later=c.patch(f'/api/v1/tasks/{task["id"]}',json={"status":"planned","start_at":None,"end_at":None,"postponed_at":"2026-09-01T08:00:00Z","sync_version":task["sync_version"]})
+        assert later.status_code==200
+        assert later.json()["start_at"] is None and later.json()["postponed_at"] is not None
+        scheduled=c.patch(f'/api/v1/tasks/{task["id"]}',json={"start_at":"2026-09-05T15:30:00Z","postponed_at":"2026-09-01T08:00:00Z","sync_version":later.json()["sync_version"]})
+        assert scheduled.status_code==200
+        assert scheduled.json()["start_at"].startswith("2026-09-05T15:30:00")
+        completed=c.patch(f'/api/v1/tasks/{task["id"]}',json={"status":"completed","sync_version":scheduled.json()["sync_version"]})
+        assert completed.json()["postponed_at"] is None

@@ -38,3 +38,5 @@ body[data-theme="midnight"]{--bg:#151a24;--panel:#1d2431;--ink:#f3f5fa;--muted:#
 .goal-card progress{width:min(65%,360px);accent-color:var(--accent,#ff6b45)}
 .goal-why,#task-goal-why{white-space:pre-wrap;overflow-wrap:anywhere}
 .goal-card h2{overflow-wrap:anywhere}
+.template-choice-row{display:flex;gap:8px;align-items:center}.template-choice-row select{flex:1}.template-choice-row button{white-space:nowrap}
+.task-row.postponed .check{border-color:#9b6bd3;color:#7a47b2;background:#f7f0ff}.postponed-meta{color:#7a47b2;font-weight:700}.postponed-card{margin-bottom:22px;border-color:#d9c4ee;background:color-mix(in srgb,#f4eaff 72%,var(--panel))}.postponed-card .card-title{color:#6f3da4;margin-bottom:6px}.postponed-hint{font-size:12px;color:var(--muted);margin:0 0 10px}

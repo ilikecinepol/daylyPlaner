@@ -25,3 +25,13 @@ def test_legacy_template_gets_compatible_task_data():
         loaded=client.get("/api/v1/templates").json()[0]
         assert loaded["task_data"]["title"]=="Старый шаблон"
         assert loaded["task_data"]["reminder_offsets"]==[15]
+
+def test_template_can_be_updated_and_deleted():
+    with TestClient(app) as client:
+        client.post("/api/v1/auth/register",json={"email":"template-edit@example.com","password":"StrongPass123","name":"Template"})
+        template=client.post("/api/v1/templates",json={"name":"Черновик"}).json()
+        updated=client.patch(f'/api/v1/templates/{template["id"]}',json={"name":"Готовый","priority":"P1","task_data":{"title":"Новая задача"}})
+        assert updated.status_code==200
+        assert updated.json()["name"]=="Готовый"
+        assert client.delete(f'/api/v1/templates/{template["id"]}').status_code==204
+        assert client.get("/api/v1/templates").json()==[]

@@ -76,6 +76,7 @@ class Task(Base, TimestampMixin):
     mentions: Mapped[list] = mapped_column(JSON, default=list); recurrence_rule: Mapped[str] = mapped_column(String(300), default="")
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True); sync_version: Mapped[int] = mapped_column(Integer, default=1)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    postponed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True)
 
 class Reminder(Base):

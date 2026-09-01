@@ -31,3 +31,20 @@ def test_non_member_cannot_assign_self():
         project=owner.post("/api/v1/projects",json={"name":"Private","color":"#5577e7"}).json()
         task=owner.post("/api/v1/tasks",json={"title":"Private task","project_id":project["id"]}).json()
         assert outsider.post(f"/api/v1/tasks/{task['id']}/assign-self").status_code==403
+
+
+def test_member_selecting_self_as_assignee_gets_no_assignment_notification():
+    with TestClient(app) as owner,TestClient(app) as member:
+        member_user=member.post("/api/v1/auth/register",json={"email":"self-select-member@example.com","password":"StrongPass123","name":"Исполнитель","nickname":"self_select_member"}).json()
+        owner.post("/api/v1/auth/register",json={"email":"self-select-owner@example.com","password":"StrongPass123","name":"Владелец","nickname":"self_select_owner"})
+        owner.post("/api/v1/contacts",json={"user_nickname":"self_select_member"})
+        member.post(f"/api/v1/friend-requests/{member.get('/api/v1/friend-requests').json()[0]['id']}/accept")
+        project=owner.post("/api/v1/projects",json={"name":"Проект","color":"#5577e7"}).json()
+        role=next(item for item in project["roles"] if item["name"]=="Участник")
+        owner.post(f"/api/v1/projects/{project['id']}/members",json={"user_nickname":"self_select_member","role_ids":[role["id"]]})
+        task=owner.post("/api/v1/tasks",json={"title":"Выбрать себя","project_id":project["id"]}).json()
+
+        updated=member.patch(f"/api/v1/tasks/{task['id']}",json={"assigned_to_id":member_user["id"],"sync_version":task["sync_version"]})
+
+        assert updated.status_code==200
+        assert not any(item["type"]=="task_assigned" and item.get("task_id")==task["id"] for item in member.get("/api/v1/notifications/feed").json())
