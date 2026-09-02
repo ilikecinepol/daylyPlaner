@@ -64,6 +64,8 @@ def set_member_roles(db,member,role_ids):
     if not roles:raise HTTPException(400,"Нужно назначить хотя бы одну роль")
     if len(roles)!=len(set(role_ids)):raise HTTPException(400,"Одна из ролей не принадлежит проекту")
     db.query(ProjectMemberRole).filter(ProjectMemberRole.member_id==member.id).delete();[db.add(ProjectMemberRole(member_id=member.id,role_id=r.id)) for r in roles];member.role_id=roles[0].id;return roles
+def require_project_view(roles):
+    if "view" not in {permission for role in roles for permission in (role.permissions or [])}:raise HTTPException(400,"Роль участника должна разрешать просмотр проекта и канбана")
 def sync_team_label(db,p):
     label=(p.team_label or "").strip().casefold()
     if not label:return 0
@@ -428,14 +430,20 @@ def add_member(project_id:str,data:MemberIn,u=Depends(current_user),db:Session=D
     if not person:raise HTTPException(404,"Пользователь не найден")
     m=db.scalar(select(ProjectMember).where(ProjectMember.project_id==project_id,ProjectMember.user_id==person.id))
     if not m:m=ProjectMember(project_id=project_id,user_id=person.id,role_id=role_ids[0] if role_ids else "");db.add(m);db.flush()
-    roles=set_member_roles(db,m,role_ids);db.commit();return {"id":m.id,"user_id":person.id,"name":person.name,"nickname":person.nickname,"email":person.email,"is_owner":person.id==membership(db,project_id,u).user_id,"role_id":roles[0].id,"role_ids":[r.id for r in roles],"role":roles[0].name,"role_color":roles[0].color,"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions} for r in roles]}
+    roles=set_member_roles(db,m,role_ids)
+    try:require_project_view(roles)
+    except HTTPException:db.rollback();raise
+    db.commit();return {"id":m.id,"user_id":person.id,"name":person.name,"nickname":person.nickname,"email":person.email,"is_owner":person.id==membership(db,project_id,u).user_id,"role_id":roles[0].id,"role_ids":[r.id for r in roles],"role":roles[0].name,"role_color":roles[0].color,"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions} for r in roles]}
 @app.patch("/api/v1/members/{member_id}")
 def change_member(member_id:str,data:MemberIn,u=Depends(current_user),db:Session=Depends(get_db)):
     m=db.get(ProjectMember,member_id)
     if not m:raise HTTPException(404,"Участник не найден")
     p=membership(db,m.project_id,u,"manage_members")
     if m.user_id==p.user_id:raise HTTPException(400,"Роли администратора проекта изменять нельзя")
-    roles=set_member_roles(db,m,data.role_ids or ([data.role_id] if data.role_id else []));db.commit();return {"id":m.id,"role_id":roles[0].id,"role_ids":[r.id for r in roles],"role":roles[0].name,"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions} for r in roles]}
+    roles=set_member_roles(db,m,data.role_ids or ([data.role_id] if data.role_id else []))
+    try:require_project_view(roles)
+    except HTTPException:db.rollback();raise
+    db.commit();return {"id":m.id,"role_id":roles[0].id,"role_ids":[r.id for r in roles],"role":roles[0].name,"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions} for r in roles]}
 @app.delete("/api/v1/members/{member_id}",status_code=204)
 def remove_member(member_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     m=db.get(ProjectMember,member_id)
