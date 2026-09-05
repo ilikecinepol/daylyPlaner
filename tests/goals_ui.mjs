@@ -6,7 +6,7 @@ const html=renderGoals(state,()=>"<div>task</div>","week","2026-08-30");
 assert.ok(html.includes("50%"));
 assert.ok(html.includes("&lt;Цель&gt;"));
 assert.ok(!html.includes("<script>"));
-assert.ok(renderGoals(state,()=>"", "day","2026-08-30").includes("целей пока нет"));
+assert.ok(renderGoals(state,()=>"", "day","2026-08-30").includes("&lt;Цель&gt;"));
 assert.ok(goalOptions(state.goals,"g1").includes("selected"));
 let request, refreshed=false;
 await handleGoalAction({dataset:{goalAction:"unlink",taskId:"t1"}},{state,api:async(...args)=>request=args,refresh:async()=>refreshed=true});
