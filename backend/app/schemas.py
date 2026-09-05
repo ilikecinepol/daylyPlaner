@@ -1,4 +1,5 @@
 from datetime import datetime, date
+from decimal import Decimal
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 import base64
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -42,6 +43,20 @@ class GoalIn(BaseModel):
     period:str=Field(pattern="^(day|week|month)$")
     date:date
     parent_id:str|None=None
+    target_amount:Decimal|None=Field(default=None,gt=0,max_digits=18,decimal_places=2)
+    currency:str|None=Field(default=None,pattern="^[A-Z]{3}$")
+
+    @field_validator("currency")
+    @classmethod
+    def financial_pair(cls,value,info):
+        return value
+
+class TaskFinanceIn(BaseModel):
+    type:str=Field(pattern="^(income|expense)$")
+    amount:Decimal=Field(gt=0,max_digits=18,decimal_places=2)
+    currency:str=Field(pattern="^[A-Z]{3}$")
+    account_id:str
+    category_id:str|None=None
 
 class ArchiveSettings(BaseModel):
     policy:str=Field(pattern="^(never|immediate|end_of_day|after_days)$"); days:int=Field(default=7,ge=1,le=365)
@@ -51,13 +66,15 @@ class NotificationSettingsIn(BaseModel):
     rules:dict[str,NotificationRule]
 class TaskIn(BaseModel):
     goal_id:str|None=None
+    finance:TaskFinanceIn|None=None
     title:str=Field(min_length=1,max_length=500); description:str=""; priority:str=Field(default="P3",pattern="^P[1-4]$"); status:str=Field(default="planned",pattern="^(idea|planned|in_progress|completed|cancelled)$"); project_id:str|None=None; column_id:str|None=None; assigned_to_id:str|None=None; start_at:datetime|None=None; end_at:datetime|None=None; postponed_at:datetime|None=None; deadline_at:datetime|None=None; deadline_action:str=Field(default="none",pattern="^(none|mark_overdue|auto_complete)$"); due_at:datetime|None=None; duration_minutes:int=Field(default=60,ge=0,le=10080); all_day:bool=False; location:str=""; tags:list[str]=[]; mentions:list[str]=[]; recurrence_rule:str=""; reminder_offsets:list[int]=[]
 class TaskPatch(BaseModel):
     goal_id:str|None=None
+    finance:TaskFinanceIn|None=None
     model_config=ConfigDict(extra="forbid")
     title:str|None=Field(default=None,min_length=1,max_length=500); description:str|None=None; priority:str|None=Field(default=None,pattern="^P[1-4]$"); status:str|None=Field(default=None,pattern="^(idea|planned|in_progress|completed|cancelled)$"); project_id:str|None=None; column_id:str|None=None; assigned_to_id:str|None=None; start_at:datetime|None=None; end_at:datetime|None=None; postponed_at:datetime|None=None; deadline_at:datetime|None=None; deadline_action:str|None=Field(default=None,pattern="^(none|mark_overdue|auto_complete)$"); due_at:datetime|None=None; duration_minutes:int|None=Field(default=None,ge=0,le=10080); all_day:bool|None=None; location:str|None=None; tags:list[str]|None=None; mentions:list[str]|None=None; recurrence_rule:str|None=None; reminder_offsets:list[int]|None=None; sync_version:int|None=None
 class ProjectIn(BaseModel):
-    name:str=Field(min_length=1,max_length=160); description:str=""; color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$"); priority:str=Field(default="P3",pattern="^P[1-4]$"); team_label:str=Field(default="",max_length=100)
+    name:str=Field(min_length=1,max_length=160); description:str=""; color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$"); priority:str=Field(default="P3",pattern="^P[1-4]$"); team_label:str=Field(default="",max_length=100); budget_amount:Decimal|None=Field(default=None,gt=0,max_digits=18,decimal_places=2); budget_currency:str|None=Field(default=None,pattern="^[A-Z]{3}$")
 class ProjectDeleteIn(BaseModel):
     task_policy:str=Field(default="keep",pattern="^(keep|archive|delete)$")
 class ColumnIn(BaseModel):

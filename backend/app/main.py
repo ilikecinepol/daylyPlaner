@@ -20,6 +20,8 @@ from .schemas import ProfileIn
 from .api.dependencies import set_session_cookie as cookie,current_user,iso_utc as dt
 from .api.integrations import router as integrations_router
 from .api.goals import router as goals_router, owned_goal
+from .finance.router import router as finance_router
+from .finance.service import set_task_finance, clone_task_finance
 
 @asynccontextmanager
 async def lifespan(_app:FastAPI):
@@ -29,6 +31,7 @@ async def lifespan(_app:FastAPI):
 app=FastAPI(title="План API",version="1.0.0",docs_url="/api/docs",openapi_url="/api/openapi.json",lifespan=lifespan)
 app.include_router(integrations_router)
 app.include_router(goals_router)
+app.include_router(finance_router)
 
 @app.middleware("http")
 async def reject_cross_origin_writes(request:Request,call_next):
@@ -119,7 +122,7 @@ def project_out(db,p):
     for c in db.scalars(select(ChatChannel).where(ChatChannel.project_id==p.id).order_by(ChatChannel.position)):
         rules=[{"role_id":x.role_id,"denied_permissions":x.denied_permissions or []} for x in db.scalars(select(ChannelRoleRule).where(ChannelRoleRule.channel_id==c.id))]
         channels.append({"id":c.id,"name":c.name,"description":c.description,"position":c.position,"role_rules":rules})
-    return {"id":p.id,"name":p.name,"description":p.description,"color":p.color,"priority":p.priority,"team_label":p.team_label or "","owner_id":p.user_id,"columns":[{"id":c.id,"name":c.name,"position":c.position} for c in db.scalars(select(KanbanColumn).where(KanbanColumn.project_id==p.id).order_by(KanbanColumn.position))],"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position} for r in roles],"members":members,"role_rules":project_rules,"channels":channels}
+    return {"id":p.id,"name":p.name,"description":p.description,"color":p.color,"priority":p.priority,"team_label":p.team_label or "","budget_amount":str(p.budget_amount) if p.budget_amount is not None else None,"budget_currency":p.budget_currency,"owner_id":p.user_id,"columns":[{"id":c.id,"name":c.name,"position":c.position} for c in db.scalars(select(KanbanColumn).where(KanbanColumn.project_id==p.id).order_by(KanbanColumn.position))],"roles":[{"id":r.id,"name":r.name,"color":r.color,"permissions":r.permissions,"position":r.position} for r in roles],"members":members,"role_rules":project_rules,"channels":channels}
 def log(db,u,action,task_id=None,changes={}): db.add(ActivityLog(user_id=u.id,task_id=task_id,action=action,changes=changes))
 @app.post("/api/v1/auth/register",status_code=201)
 def register(c:Credentials,response:Response,db:Session=Depends(get_db)):
@@ -169,8 +172,8 @@ def create_task(data:TaskIn,u=Depends(current_user),db:Session=Depends(get_db)):
 def create_task_service(data,u,db,commit=True):
     if data.goal_id:owned_goal(db,data.goal_id,u)
     if data.project_id:membership(db,data.project_id,u,"edit_tasks")
-    validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=normalize_schedule(data.model_dump(exclude={"reminder_offsets"}));t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
-    db.add(t);db.flush();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in data.reminder_offsets];log(db,u,"task_created",t.id);db.commit() if commit else db.flush();return task_out(db,t)
+    validate_assignee(db,data.project_id,data.assigned_to_id,u.id);values=normalize_schedule(data.model_dump(exclude={"reminder_offsets","finance"}));t=Task(user_id=u.id,**values);sync_task_workflow(db,t,u,status_changed=True,column_changed=bool(t.column_id))
+    db.add(t);db.flush();set_task_finance(db,t,u,data.finance);[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in data.reminder_offsets];log(db,u,"task_created",t.id);db.commit() if commit else db.flush();return task_out(db,t)
 @app.get("/api/v1/tasks/{task_id}")
 def get_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(Task,task_id)
@@ -186,7 +189,7 @@ def patch_task_service(task_id,data,u,db,commit=True):
     if t.project_id:
         if db.get(Project,t.project_id).user_id!=u.id:membership(db,t.project_id,u,"edit_tasks")
     elif t.user_id!=u.id:raise HTTPException(404,"Задача не найдена")
-    patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None);deadline_changed=bool({"deadline_at","deadline_action"}&set(patch))
+    patch=data.model_dump(exclude_unset=True);expected=patch.pop("sync_version",None);finance=patch.pop("finance",...);deadline_changed=bool({"deadline_at","deadline_action"}&set(patch))
     if expected is not None and expected!=t.sync_version: raise HTTPException(409,"Задача была изменена на другом устройстве")
     if "goal_id" in patch:
         if t.user_id != u.id and patch["goal_id"] != t.goal_id:raise HTTPException(403,"Цель может менять только владелец задачи")
@@ -198,11 +201,12 @@ def patch_task_service(task_id,data,u,db,commit=True):
     before={k:getattr(t,k) for k in patch}
     validate_assignee(db,patch.get("project_id",t.project_id),patch.get("assigned_to_id",t.assigned_to_id),u.id)
     for k,v in patch.items(): setattr(t,k,v)
+    if finance is not ...:set_task_finance(db,t,u,data.finance)
     sync_task_workflow(db,t,u,status_changed="status" in patch,column_changed="column_id" in patch and "status" not in patch)
     if "status" in patch and patch["status"]=="completed":
         nxt=next_occurrence(t.start_at,t.recurrence_rule)
         if nxt and not db.scalar(select(Task).where(Task.user_id==u.id,Task.title==t.title,Task.start_at==nxt,Task.deleted_at==None)):
-            shift=nxt-t.start_at;child=Task(user_id=u.id,project_id=t.project_id,column_id=t.column_id,title=t.title,description=t.description,status="planned",priority=t.priority,start_at=nxt,end_at=(t.end_at+shift) if t.end_at else None,deadline_at=(t.deadline_at+shift) if t.deadline_at else None,deadline_action=t.deadline_action,duration_minutes=t.duration_minutes,all_day=t.all_day,location=t.location,tags=t.tags,mentions=t.mentions,recurrence_rule=t.recurrence_rule);db.add(child);db.flush();[db.add(Reminder(task_id=child.id,offset_minutes=r.offset_minutes,channel=r.channel)) for r in db.scalars(select(Reminder).where(Reminder.task_id==t.id))]
+            shift=nxt-t.start_at;child=Task(user_id=u.id,project_id=t.project_id,column_id=t.column_id,goal_id=t.goal_id,title=t.title,description=t.description,status="planned",priority=t.priority,start_at=nxt,end_at=(t.end_at+shift) if t.end_at else None,deadline_at=(t.deadline_at+shift) if t.deadline_at else None,deadline_action=t.deadline_action,duration_minutes=t.duration_minutes,all_day=t.all_day,location=t.location,tags=t.tags,mentions=t.mentions,recurrence_rule=t.recurrence_rule);db.add(child);db.flush();clone_task_finance(db,t,child);[db.add(Reminder(task_id=child.id,offset_minutes=r.offset_minutes,channel=r.channel)) for r in db.scalars(select(Reminder).where(Reminder.task_id==t.id))]
     t.sync_version=(t.sync_version or 0)+1
     if offsets is not None:db.query(Reminder).filter(Reminder.task_id==t.id).delete();[db.add(Reminder(task_id=t.id,offset_minutes=x)) for x in offsets]
     if "assigned_to_id" in patch and before["assigned_to_id"]!=patch["assigned_to_id"]:

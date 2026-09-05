@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Goal, Task
+from ..models import Goal, Task, FinanceTransaction
 from ..schemas import GoalIn
 from .dependencies import current_user
 
@@ -32,15 +32,19 @@ def assign_values(db, goal, data, user):
     end = start + timedelta(days=6) if data.period == "week" else start.replace(day=monthrange(start.year, start.month)[1]) if data.period == "month" else start
     goal.title, goal.why, goal.period = data.title, data.why, data.period
     goal.period_start, goal.period_end, goal.parent_id = start, end, data.parent_id
+    if bool(data.target_amount)!=bool(data.currency):raise HTTPException(400,"Для финансовой цели нужны сумма и валюта")
+    goal.target_amount,goal.currency=data.target_amount,data.currency
 
 def output(db, goal):
     tasks = list(db.scalars(select(Task).where(Task.goal_id == goal.id, Task.deleted_at == None)))
     counted = [t for t in tasks if t.status != "cancelled"]
     completed = sum(t.status == "completed" for t in counted)
+    contributed=sum((t.amount for t in db.scalars(select(FinanceTransaction).where(FinanceTransaction.goal_id==goal.id,FinanceTransaction.user_id==goal.user_id,FinanceTransaction.goal_contribution==True,FinanceTransaction.deleted_at==None,FinanceTransaction.currency==goal.currency))),start=0) if goal.target_amount else 0
+    financial_progress=min(100,round(100*contributed/goal.target_amount)) if goal.target_amount else None
     return dict(id=goal.id, title=goal.title, why=goal.why, period=goal.period,
                 period_start=goal.period_start, period_end=goal.period_end, parent_id=goal.parent_id,
                 total=len(counted), completed=completed,
-                progress=round(100 * completed / len(counted)) if counted else 0)
+                progress=round(100 * completed / len(counted)) if counted else 0,target_amount=str(goal.target_amount) if goal.target_amount is not None else None,currency=goal.currency,financial_current=str(contributed),financial_progress=financial_progress)
 
 @router.get("")
 def list_goals(db: Session = Depends(get_db), user=Depends(current_user)):

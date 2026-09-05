@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text, JSON, UniqueConstraint
+from decimal import Decimal
+from sqlalchemy import String, Integer, Boolean, DateTime, Date, ForeignKey, Text, JSON, UniqueConstraint, Numeric, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from .database import Base
 
@@ -36,6 +37,8 @@ class Project(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(160)); description: Mapped[str] = mapped_column(Text, default="")
     color: Mapped[str] = mapped_column(String(20), default="#5577e7"); priority: Mapped[str] = mapped_column(String(2), default="P3"); team_label: Mapped[str] = mapped_column(String(100), default="", index=True)
+    budget_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    budget_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
 
 class KanbanColumn(Base):
     __tablename__ = "kanban_columns"; __table_args__ = (UniqueConstraint("project_id", "position"),)
@@ -53,6 +56,8 @@ class Goal(Base, TimestampMixin):
     period_start = mapped_column(Date, nullable=False)
     period_end = mapped_column(Date, nullable=False)
     parent_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True)
+    target_amount: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
 
 class Task(Base, TimestampMixin):
     __tablename__ = "tasks"
@@ -78,6 +83,49 @@ class Task(Base, TimestampMixin):
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     postponed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True)
+
+class FinanceAccount(Base, TimestampMixin):
+    __tablename__ = "finance_accounts"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    type: Mapped[str] = mapped_column(String(30))
+    currency: Mapped[str] = mapped_column(String(3))
+    opening_balance: Mapped[Decimal] = mapped_column(Numeric(18, 2), default=Decimal("0"))
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+
+class FinanceCategory(Base, TimestampMixin):
+    __tablename__ = "finance_categories"; __table_args__ = (UniqueConstraint("user_id", "type", "name"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(100)); type: Mapped[str] = mapped_column(String(10))
+    color: Mapped[str] = mapped_column(String(20), default="#5577e7"); is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+
+class FinanceTransaction(Base, TimestampMixin):
+    __tablename__ = "finance_transactions"
+    __table_args__ = (Index("ix_finance_transactions_user_date", "user_id", "transaction_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(10)); amount: Mapped[Decimal] = mapped_column(Numeric(18, 2)); currency: Mapped[str] = mapped_column(String(3))
+    account_id: Mapped[str] = mapped_column(ForeignKey("finance_accounts.id", ondelete="RESTRICT"), index=True)
+    destination_account_id: Mapped[str | None] = mapped_column(ForeignKey("finance_accounts.id", ondelete="RESTRICT"), nullable=True, index=True)
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("finance_categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    transaction_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    task_id: Mapped[str | None] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id: Mapped[str | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True)
+    goal_contribution: Mapped[bool] = mapped_column(Boolean, default=False)
+
+class TaskFinanceBinding(Base, TimestampMixin):
+    __tablename__ = "task_finance_bindings"; __table_args__ = (UniqueConstraint("task_id", "user_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(10)); amount: Mapped[Decimal] = mapped_column(Numeric(18, 2)); currency: Mapped[str] = mapped_column(String(3))
+    account_id: Mapped[str] = mapped_column(ForeignKey("finance_accounts.id", ondelete="RESTRICT"))
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("finance_categories.id", ondelete="SET NULL"), nullable=True)
+    transaction_id: Mapped[str | None] = mapped_column(ForeignKey("finance_transactions.id", ondelete="SET NULL"), nullable=True, unique=True)
 
 class Reminder(Base):
     __tablename__ = "reminders"

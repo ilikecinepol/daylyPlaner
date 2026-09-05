@@ -16,9 +16,9 @@ export async function handleGoalAction(button, ctx) {
   if(action==="create"||action==="edit") {
     const g=goal||{title:"",why:"",period,period_start:date};
     const parents=state.goals.filter(p=>p.id!==g.id&&rank[p.period]>rank[g.period]);
-    const data=await dialog(goal?"Изменить цель":"Новая цель",`<label>Название<input name="title" maxlength="300" required value="${esc(g.title)}"></label><label>Зачем это важно<textarea name="why" maxlength="4000">${esc(g.why)}</textarea></label><p>Период: ${labels[g.period]}</p><label>Дата внутри периода<input name="date" type="date" required value="${g.period_start}"></label><label>Родительская цель<select name="parent_id">${goalOptions(parents,g.parent_id)}</select></label>`);
+    const data=await dialog(goal?"Изменить цель":"Новая цель",`<label>Название<input name="title" maxlength="300" required value="${esc(g.title)}"></label><label>Зачем это важно<textarea name="why" maxlength="4000">${esc(g.why)}</textarea></label><p>Период: ${labels[g.period]}</p><label>Дата внутри периода<input name="date" type="date" required value="${g.period_start}"></label><label>Родительская цель<select name="parent_id">${goalOptions(parents,g.parent_id)}</select></label><fieldset><legend>Финансовый показатель (необязательно)</legend><div class="form-grid"><label>Целевая сумма<input name="target_amount" type="number" min="0.01" step="0.01" value="${g.target_amount||''}"></label><label>Валюта<input name="currency" pattern="[A-Z]{3}" value="${g.currency||'RUB'}"></label></div></fieldset>`);
     if(!data)return;
-    await api("/goals"+(goal?"/"+goal.id:""),{method:goal?"PUT":"POST",body:JSON.stringify({title:data.title,why:data.why,date:data.date,period:g.period,parent_id:data.parent_id||null})});
+    await api("/goals"+(goal?"/"+goal.id:""),{method:goal?"PUT":"POST",body:JSON.stringify({title:data.title,why:data.why,date:data.date,period:g.period,parent_id:data.parent_id||null,target_amount:data.target_amount||null,currency:data.target_amount?data.currency:null})});
   } else if(action==="delete") {
     if(!await dialog("Удалить цель?", "<p>Все задачи сохранятся. Удалится только их связь с этой целью.</p>","Удалить"))return;
     await api("/goals/"+goal.id,{method:"DELETE"});
