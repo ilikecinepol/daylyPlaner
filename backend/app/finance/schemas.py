@@ -11,6 +11,16 @@ class CategoryIn(BaseModel):
     model_config=ConfigDict(extra="forbid",str_strip_whitespace=True)
     name:str=Field(min_length=1,max_length=100);type:str=Field(pattern="^(income|expense)$");color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$")
 
+class BudgetIn(BaseModel):
+    model_config=ConfigDict(extra="forbid",str_strip_whitespace=True)
+    name:str=Field(min_length=1,max_length=160)
+    amount:Decimal=Field(gt=0,max_digits=18,decimal_places=2)
+    currency:str=Field(pattern="^[A-Z]{3}$")
+    category_id:str|None=None
+    period:str=Field(default="monthly",pattern="^(monthly)$")
+    rollover:bool=False
+    is_active:bool=True
+
 class TransactionIn(BaseModel):
     model_config=ConfigDict(extra="forbid",str_strip_whitespace=True)
     type:str=Field(pattern="^(income|expense|transfer)$");amount:Decimal=Field(gt=0,max_digits=18,decimal_places=2);currency:str=Field(pattern="^[A-Z]{3}$")

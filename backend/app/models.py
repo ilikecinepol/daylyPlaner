@@ -101,6 +101,18 @@ class FinanceCategory(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100)); type: Mapped[str] = mapped_column(String(10))
     color: Mapped[str] = mapped_column(String(20), default="#5577e7"); is_default: Mapped[bool] = mapped_column(Boolean, default=False)
 
+class FinanceBudget(Base, TimestampMixin):
+    __tablename__ = "finance_budgets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
+    currency: Mapped[str] = mapped_column(String(3))
+    category_id: Mapped[str | None] = mapped_column(ForeignKey("finance_categories.id", ondelete="SET NULL"), nullable=True, index=True)
+    period: Mapped[str] = mapped_column(String(20), default="monthly")
+    rollover: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
 class FinanceTransaction(Base, TimestampMixin):
     __tablename__ = "finance_transactions"
     __table_args__ = (Index("ix_finance_transactions_user_date", "user_id", "transaction_at"),)

@@ -45,3 +45,23 @@ def test_existing_goal_financial_progress_and_multicurrency_separation():
         assert tx(c,source,"transfer","10000",destination_account_id=saving["id"],goal_id=goal["id"],goal_contribution=True).status_code==201
         saved=c.get("/api/v1/goals").json()[0];assert saved["financial_current"]=="10000.00" and saved["financial_progress"]==7
         overview=c.get("/api/v1/finance/overview").json();assert {x["currency"] for x in overview["balances"]}=={"RUB","EUR"}
+
+def test_budget_crud_validation_and_user_isolation():
+    with TestClient(app) as owner,TestClient(app) as stranger:
+        register(owner);account(owner)
+        categories=owner.get("/api/v1/finance/categories").json()
+        expense=next(x for x in categories if x["type"]=="expense")
+        income=next(x for x in categories if x["type"]=="income")
+        payload={"name":"Продукты на месяц","amount":"25000.00","currency":"RUB","category_id":expense["id"],"period":"monthly","rollover":True,"is_active":True}
+        created=owner.post("/api/v1/finance/budgets",json=payload)
+        assert created.status_code==201 and created.json()["rollover"] is True
+        payload["name"]="Продукты и быт";payload["amount"]="30000.00"
+        edited=owner.patch(f'/api/v1/finance/budgets/{created.json()["id"]}',json=payload)
+        assert edited.status_code==200 and edited.json()["amount"]=="30000.00"
+        invalid={**payload,"category_id":income["id"]}
+        assert owner.post("/api/v1/finance/budgets",json=invalid).status_code==400
+        register(stranger)
+        assert stranger.get("/api/v1/finance/budgets").json()==[]
+        assert stranger.patch(f'/api/v1/finance/budgets/{created.json()["id"]}',json=payload).status_code==404
+        assert owner.delete(f'/api/v1/finance/budgets/{created.json()["id"]}').status_code==204
+        assert owner.get("/api/v1/finance/budgets").json()==[]

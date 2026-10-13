@@ -8,8 +8,8 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 from ..api.dependencies import current_user, iso_utc
 from ..database import get_db
-from ..models import FinanceAccount, FinanceCategory, FinanceTransaction, Goal, Project, ProjectMember, Task, TaskFinanceBinding
-from .schemas import AccountIn, CategoryIn, TransactionIn
+from ..models import FinanceAccount, FinanceBudget, FinanceCategory, FinanceTransaction, Goal, Project, ProjectMember, Task, TaskFinanceBinding
+from .schemas import AccountIn, BudgetIn, CategoryIn, TransactionIn
 from .service import execute_task_finance
 
 router=APIRouter(prefix="/api/v1/finance",tags=["finance"])
@@ -30,6 +30,7 @@ def account_balance(db,account):
     return value
 def account_out(db,a):return {"id":a.id,"name":a.name,"type":a.type,"currency":a.currency,"opening_balance":money(a.opening_balance),"balance":money(account_balance(db,a)),"is_archived":a.is_archived,"created_at":iso_utc(a.created_at)}
 def category_out(c):return {"id":c.id,"name":c.name,"type":c.type,"color":c.color,"is_default":c.is_default}
+def budget_out(b):return {"id":b.id,"name":b.name,"amount":money(b.amount),"currency":b.currency,"category_id":b.category_id,"period":b.period,"rollover":b.rollover,"is_active":b.is_active,"created_at":iso_utc(b.created_at)}
 def transaction_out(t):return {"id":t.id,"type":t.type,"amount":money(t.amount),"currency":t.currency,"account_id":t.account_id,"destination_account_id":t.destination_account_id,"category_id":t.category_id,"transaction_at":iso_utc(t.transaction_at),"description":t.description,"task_id":t.task_id,"project_id":t.project_id,"goal_id":t.goal_id,"goal_contribution":t.goal_contribution}
 def ensure_defaults(db,user):
     if db.scalar(select(FinanceCategory.id).where(FinanceCategory.user_id==user.id).limit(1)):return
@@ -80,6 +81,26 @@ def edit_category(item_id:str,data:CategoryIn,db:Session=Depends(get_db),user=De
     c=owned(db,FinanceCategory,item_id,user,"Категория")
     for k,v in data.model_dump().items():setattr(c,k,v)
     db.commit();return category_out(c)
+
+def validate_budget(db,data,user):
+    if data.category_id:
+        category=owned(db,FinanceCategory,data.category_id,user,"Категория")
+        if category.type!="expense":raise HTTPException(400,"Бюджет можно связать только с категорией расходов")
+
+@router.get("/budgets")
+def budgets(db:Session=Depends(get_db),user=Depends(current_user)):
+    return [budget_out(b) for b in db.scalars(select(FinanceBudget).where(FinanceBudget.user_id==user.id,FinanceBudget.deleted_at==None).order_by(FinanceBudget.created_at))]
+@router.post("/budgets",status_code=201)
+def create_budget(data:BudgetIn,db:Session=Depends(get_db),user=Depends(current_user)):
+    validate_budget(db,data,user);b=FinanceBudget(user_id=user.id,**data.model_dump());db.add(b);db.commit();return budget_out(b)
+@router.patch("/budgets/{item_id}")
+def edit_budget(item_id:str,data:BudgetIn,db:Session=Depends(get_db),user=Depends(current_user)):
+    b=owned(db,FinanceBudget,item_id,user,"Бюджет");validate_budget(db,data,user)
+    for k,v in data.model_dump().items():setattr(b,k,v)
+    db.commit();return budget_out(b)
+@router.delete("/budgets/{item_id}",status_code=204)
+def delete_budget(item_id:str,db:Session=Depends(get_db),user=Depends(current_user)):
+    b=owned(db,FinanceBudget,item_id,user,"Бюджет");b.deleted_at=datetime.now(timezone.utc);db.commit()
 
 def transaction_query(user,from_,to,account,category,project,goal,type_):
     q=select(FinanceTransaction).where(FinanceTransaction.user_id==user.id,FinanceTransaction.deleted_at==None)
