@@ -1,5 +1,5 @@
 import os,tempfile
-db_file=tempfile.NamedTemporaryFile(suffix=".db",delete=False).name
+with tempfile.NamedTemporaryFile(suffix=".db",delete=False) as db_handle:db_file=db_handle.name
 os.environ["DATABASE_URL"]="sqlite:///"+db_file
 os.environ["SECRET_KEY"]="test-secret"
 from fastapi.testclient import TestClient
@@ -142,3 +142,23 @@ def test_task_can_be_postponed_with_or_without_a_new_date():
         assert scheduled.json()["start_at"].startswith("2026-09-05T15:30:00")
         completed=c.patch(f'/api/v1/tasks/{task["id"]}',json={"status":"completed","sync_version":scheduled.json()["sync_version"]})
         assert completed.json()["postponed_at"] is None
+
+def test_tasks_can_be_completed_in_one_atomic_bulk_request():
+    with TestClient(app) as c:
+        c.post("/api/v1/auth/register",json={"email":"bulk@example.com","password":"StrongPass123","name":"Bulk"})
+        first=c.post("/api/v1/tasks",json={"title":"Первая"}).json()
+        second=c.post("/api/v1/tasks",json={"title":"Вторая"}).json()
+        completed=c.post("/api/v1/tasks/bulk-complete",json={"tasks":[{"id":first["id"],"sync_version":first["sync_version"]},{"id":second["id"],"sync_version":second["sync_version"]}]})
+        assert completed.status_code==200
+        assert {task["id"] for task in completed.json()}=={first["id"],second["id"]}
+        assert all(task["status"]=="completed" and task["completed_at"] for task in completed.json())
+
+def test_bulk_completion_rolls_back_when_one_task_is_stale():
+    with TestClient(app) as c:
+        c.post("/api/v1/auth/register",json={"email":"bulk-stale@example.com","password":"StrongPass123","name":"Bulk stale"})
+        first=c.post("/api/v1/tasks",json={"title":"Останется активной"}).json()
+        second=c.post("/api/v1/tasks",json={"title":"Конфликт"}).json()
+        c.patch(f'/api/v1/tasks/{second["id"]}',json={"priority":"P1","sync_version":second["sync_version"]})
+        result=c.post("/api/v1/tasks/bulk-complete",json={"tasks":[{"id":first["id"],"sync_version":first["sync_version"]},{"id":second["id"],"sync_version":second["sync_version"]}]})
+        assert result.status_code==409
+        assert c.get(f'/api/v1/tasks/{first["id"]}').json()["status"]=="planned"

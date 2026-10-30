@@ -73,6 +73,19 @@ class TaskPatch(BaseModel):
     finance:TaskFinanceIn|None=None
     model_config=ConfigDict(extra="forbid")
     title:str|None=Field(default=None,min_length=1,max_length=500); description:str|None=None; priority:str|None=Field(default=None,pattern="^P[1-4]$"); status:str|None=Field(default=None,pattern="^(idea|planned|in_progress|completed|cancelled)$"); project_id:str|None=None; column_id:str|None=None; assigned_to_id:str|None=None; start_at:datetime|None=None; end_at:datetime|None=None; postponed_at:datetime|None=None; deadline_at:datetime|None=None; deadline_action:str|None=Field(default=None,pattern="^(none|mark_overdue|auto_complete)$"); due_at:datetime|None=None; duration_minutes:int|None=Field(default=None,ge=0,le=10080); all_day:bool|None=None; location:str|None=None; tags:list[str]|None=None; mentions:list[str]|None=None; recurrence_rule:str|None=None; reminder_offsets:list[int]|None=None; sync_version:int|None=None
+class TaskBulkItem(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    id:str
+    sync_version:int|None=None
+class TaskBulkComplete(BaseModel):
+    model_config=ConfigDict(extra="forbid")
+    tasks:list[TaskBulkItem]=Field(min_length=1,max_length=200)
+
+    @field_validator("tasks")
+    @classmethod
+    def unique_tasks(cls,value):
+        if len({item.id for item in value})!=len(value):raise ValueError("Задачи не должны повторяться")
+        return value
 class ProjectIn(BaseModel):
     name:str=Field(min_length=1,max_length=160); description:str=""; color:str=Field(default="#5577e7",pattern="^#[0-9a-fA-F]{6}$"); priority:str=Field(default="P3",pattern="^P[1-4]$"); team_label:str=Field(default="",max_length=100); budget_amount:Decimal|None=Field(default=None,gt=0,max_digits=18,decimal_places=2); budget_currency:str|None=Field(default=None,pattern="^[A-Z]{3}$")
 class ProjectDeleteIn(BaseModel):

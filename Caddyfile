@@ -1,4 +1,10 @@
 simpleplanner.ru, www.simpleplanner.ru {
     encode zstd gzip
+    redir /train https://train.simpleplanner.ru/t 302
     reverse_proxy app:8000
+}
+
+train.simpleplanner.ru {
+    encode zstd gzip
+    reverse_proxy trainingbot:8000
 }

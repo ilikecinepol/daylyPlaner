@@ -9,7 +9,7 @@ from sqlalchemy import select, or_, func
 from sqlalchemy.orm import Session
 from .database import Base,engine,get_db
 from .models import User,Project,Task,TaskTemplate,KanbanColumn,Reminder,ActivityLog,Contact,ProjectRole,ProjectMember,ProjectMemberRole,ChatChannel,ChatMessage,FriendRole,ContactFriendRole,ProjectRoleRule,ChannelRoleRule
-from .schemas import Credentials,TaskIn,TaskPatch,ProjectIn,ProjectDeleteIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,FriendRoleIn,RoleRuleIn,ArchiveSettings,NotificationSettingsIn
+from .schemas import Credentials,TaskIn,TaskPatch,TaskBulkComplete,ProjectIn,ProjectDeleteIn,ColumnIn,TemplateIn,ContactIn,RoleIn,MemberIn,ChannelIn,MessageIn,FriendRoleIn,RoleRuleIn,ArchiveSettings,NotificationSettingsIn
 from .security import hash_password,verify_password
 from .services.recurrence import next_occurrence
 from .services.notifications import due_reminders,filter_notification_feed,notification_settings
@@ -214,6 +214,11 @@ def patch_task_service(task_id,data,u,db,commit=True):
     if "assigned_to_id" in patch and before["assigned_to_id"]!=patch["assigned_to_id"]:
         log(db,u,"task_self_assigned" if patch["assigned_to_id"]==u.id else "task_assigned",t.id,{"assigned_to_id":patch["assigned_to_id"]})
     log(db,u,"task_updated",t.id,{k:[str(before[k]),str(v)] for k,v in patch.items() if before[k]!=v});db.commit() if commit else db.flush();return task_out(db,t)
+@app.post("/api/v1/tasks/bulk-complete")
+def bulk_complete_tasks(data:TaskBulkComplete,u=Depends(current_user),db:Session=Depends(get_db)):
+    updated=[patch_task_service(item.id,TaskPatch(status="completed",postponed_at=None,sync_version=item.sync_version),u,db,commit=False) for item in data.tasks]
+    db.commit()
+    return updated
 @app.delete("/api/v1/tasks/{task_id}",status_code=204)
 def delete_task(task_id:str,u=Depends(current_user),db:Session=Depends(get_db)):
     t=db.get(Task,task_id)
