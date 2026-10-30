@@ -22,6 +22,7 @@ from .api.integrations import router as integrations_router
 from .api.goals import router as goals_router, owned_goal
 from .finance.router import router as finance_router
 from .finance.service import set_task_finance, clone_task_finance
+from .crace.router import router as crace_router
 
 @asynccontextmanager
 async def lifespan(_app:FastAPI):
@@ -32,6 +33,7 @@ app=FastAPI(title="План API",version="1.0.0",docs_url="/api/docs",openapi_ur
 app.include_router(integrations_router)
 app.include_router(goals_router)
 app.include_router(finance_router)
+app.include_router(crace_router)
 
 @app.middleware("http")
 async def reject_cross_origin_writes(request:Request,call_next):

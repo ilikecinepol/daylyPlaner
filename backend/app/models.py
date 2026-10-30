@@ -129,6 +129,32 @@ class FinanceTransaction(Base, TimestampMixin):
     goal_id: Mapped[str | None] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"), nullable=True, index=True)
     goal_contribution: Mapped[bool] = mapped_column(Boolean, default=False)
 
+class CraceProfile(Base, TimestampMixin):
+    __tablename__ = "crace_profiles"
+    __table_args__ = (UniqueConstraint("user_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    weight_kg: Mapped[Decimal | None] = mapped_column(Numeric(6, 2), nullable=True)
+    max_hr: Mapped[int] = mapped_column(Integer, default=190)
+    race_date = mapped_column(Date, nullable=False)
+    completed_sessions: Mapped[dict] = mapped_column(JSON, default=dict)
+
+class CraceWorkout(Base):
+    __tablename__ = "crace_workouts"
+    __table_args__ = (Index("ix_crace_workouts_user_started", "user_id", "started_at"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    plan_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    title: Mapped[str] = mapped_column(String(300))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    duration_sec: Mapped[int] = mapped_column(Integer, default=0)
+    avg_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rpe: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    samples: Mapped[list] = mapped_column(JSON, default=list)
+    laps: Mapped[list] = mapped_column(JSON, default=list)
+
 class TaskFinanceBinding(Base, TimestampMixin):
     __tablename__ = "task_finance_bindings"; __table_args__ = (UniqueConstraint("task_id", "user_id"),)
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
