@@ -38,7 +38,7 @@ python run.py
 
 ## Конфигурация
 
-См. `.env.example`. Основные переменные: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `COOKIE_SECURE`, `ALLOWED_ORIGINS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. При `APP_ENV=production` приложение не запускается без `SECRET_KEY`, а cookie автоматически получает `Secure`. Auth cookie имеет `HttpOnly`, `SameSite=Lax` и срок 7 дней. OAuth callback проверяет подписанный и ограниченный по времени `state`; cross-origin изменяющие запросы отклоняются, кроме явно разрешённых origins.
+См. `.env.example`. Локальный запуск через `python run.py` автоматически читает игнорируемый Git файл `.env`, причём уже заданные переменные окружения имеют приоритет. Основные переменные: `APP_ENV`, `SECRET_KEY`, `DATABASE_URL`, `COOKIE_SECURE`, `ALLOWED_ORIGINS`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`. `MODULE_ACCESS_CODE` задаёт общий приватный код, по которому пользователь один раз подключает ИИ, финансы или CRACE на странице «Дополнительные возможности»; при необходимости используйте отдельные `MODULE_ACCESS_CODE_AI`, `MODULE_ACCESS_CODE_FINANCE` и `MODULE_ACCESS_CODE_CRACE`. Код хранится только на сервере, а в базе сохраняется выданное право, поэтому код можно безопасно ротировать. При `APP_ENV=production` приложение не запускается без `SECRET_KEY`, а cookie автоматически получает `Secure`. Auth cookie имеет `HttpOnly`, `SameSite=Lax` и срок 7 дней. OAuth callback проверяет подписанный и ограниченный по времени `state`; cross-origin изменяющие запросы отклоняются, кроме явно разрешённых origins.
 
 ## Миграции
 

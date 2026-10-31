@@ -24,6 +24,10 @@ services:
       COOKIE_SECURE: "1"
       ALLOWED_ORIGINS: https://simpleplanner.ru,https://www.simpleplanner.ru
       SECRET_KEY: ${SECRET_KEY}
+      MODULE_ACCESS_CODE: ${MODULE_ACCESS_CODE}
+      MODULE_ACCESS_CODE_AI: ${MODULE_ACCESS_CODE_AI:-}
+      MODULE_ACCESS_CODE_FINANCE: ${MODULE_ACCESS_CODE_FINANCE:-}
+      MODULE_ACCESS_CODE_CRACE: ${MODULE_ACCESS_CODE_CRACE:-}
       DATABASE_URL: postgresql+psycopg://planner:${POSTGRES_PASSWORD}@db:5432/planner
     depends_on:
       db:

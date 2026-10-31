@@ -17,6 +17,14 @@ services:
         generateValue: true
       - key: COOKIE_SECURE
         value: "1"
+      - key: MODULE_ACCESS_CODE
+        sync: false
+      - key: MODULE_ACCESS_CODE_AI
+        sync: false
+      - key: MODULE_ACCESS_CODE_FINANCE
+        sync: false
+      - key: MODULE_ACCESS_CODE_CRACE
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: daylyplaner-db

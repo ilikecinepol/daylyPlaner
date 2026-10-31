@@ -7,6 +7,7 @@ from ..database import get_db
 from ..models import Goal, Task, FinanceTransaction
 from ..schemas import GoalIn
 from .dependencies import current_user
+from ..modules import ensure_module, module_connected
 
 router = APIRouter(prefix="/api/v1/goals", tags=["goals"])
 RANK = {"day": 0, "week": 1, "month": 2}
@@ -32,36 +33,42 @@ def assign_values(db, goal, data, user):
     end = start + timedelta(days=6) if data.period == "week" else start.replace(day=monthrange(start.year, start.month)[1]) if data.period == "month" else start
     goal.title, goal.why, goal.period = data.title, data.why, data.period
     goal.period_start, goal.period_end, goal.parent_id = start, end, data.parent_id
-    if bool(data.target_amount)!=bool(data.currency):raise HTTPException(400,"Для финансовой цели нужны сумма и валюта")
-    goal.target_amount,goal.currency=data.target_amount,data.currency
+    if module_connected(db, user, "finance"):
+        if bool(data.target_amount)!=bool(data.currency):raise HTTPException(400,"Для финансовой цели нужны сумма и валюта")
+        goal.target_amount,goal.currency=data.target_amount,data.currency
+    elif data.target_amount or data.currency:
+        ensure_module(db, user, "finance")
 
-def output(db, goal):
+def output(db, goal, finance_access=False):
     tasks = list(db.scalars(select(Task).where(Task.goal_id == goal.id, Task.deleted_at == None)))
     counted = [t for t in tasks if t.status != "cancelled"]
     completed = sum(t.status == "completed" for t in counted)
-    contributed=sum((t.amount for t in db.scalars(select(FinanceTransaction).where(FinanceTransaction.goal_id==goal.id,FinanceTransaction.user_id==goal.user_id,FinanceTransaction.goal_contribution==True,FinanceTransaction.deleted_at==None,FinanceTransaction.currency==goal.currency))),start=0) if goal.target_amount else 0
-    financial_progress=min(100,round(100*contributed/goal.target_amount)) if goal.target_amount else None
+    target_amount=goal.target_amount if finance_access else None
+    currency=goal.currency if finance_access else None
+    contributed=sum((t.amount for t in db.scalars(select(FinanceTransaction).where(FinanceTransaction.goal_id==goal.id,FinanceTransaction.user_id==goal.user_id,FinanceTransaction.goal_contribution==True,FinanceTransaction.deleted_at==None,FinanceTransaction.currency==goal.currency))),start=0) if target_amount else 0
+    financial_progress=min(100,round(100*contributed/target_amount)) if target_amount else None
     return dict(id=goal.id, title=goal.title, why=goal.why, period=goal.period,
                 period_start=goal.period_start, period_end=goal.period_end, parent_id=goal.parent_id,
                 total=len(counted), completed=completed,
-                progress=round(100 * completed / len(counted)) if counted else 0,target_amount=str(goal.target_amount) if goal.target_amount is not None else None,currency=goal.currency,financial_current=str(contributed),financial_progress=financial_progress)
+                progress=round(100 * completed / len(counted)) if counted else 0,target_amount=str(target_amount) if target_amount is not None else None,currency=currency,financial_current=str(contributed),financial_progress=financial_progress)
 
 @router.get("")
 def list_goals(db: Session = Depends(get_db), user=Depends(current_user)):
-    return [output(db, goal) for goal in db.scalars(select(Goal).where(Goal.user_id == user.id, Goal.deleted_at == None).order_by(Goal.period_start.desc(), Goal.created_at))]
+    access=module_connected(db,user,"finance")
+    return [output(db, goal, access) for goal in db.scalars(select(Goal).where(Goal.user_id == user.id, Goal.deleted_at == None).order_by(Goal.period_start.desc(), Goal.created_at))]
 
 @router.post("", status_code=201)
 def create_goal(data: GoalIn, db: Session = Depends(get_db), user=Depends(current_user)):
     goal = Goal(user_id=user.id)
     assign_values(db, goal, data, user)
     db.add(goal); db.commit()
-    return output(db, goal)
+    return output(db, goal, module_connected(db,user,"finance"))
 
 @router.put("/{goal_id}")
 def edit_goal(goal_id: str, data: GoalIn, db: Session = Depends(get_db), user=Depends(current_user)):
     goal = owned_goal(db, goal_id, user)
     assign_values(db, goal, data, user); db.commit()
-    return output(db, goal)
+    return output(db, goal, module_connected(db,user,"finance"))
 
 @router.delete("/{goal_id}", status_code=204)
 def delete_goal(goal_id: str, db: Session = Depends(get_db), user=Depends(current_user)):

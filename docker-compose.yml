@@ -18,6 +18,9 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://planner:planner@db:5432/planner
       SECRET_KEY: change-this-secret
+      MODULE_ACCESS_CODE_AI: ${MODULE_ACCESS_CODE_AI:-}
+      MODULE_ACCESS_CODE_FINANCE: ${MODULE_ACCESS_CODE_FINANCE:-}
+      MODULE_ACCESS_CODE_CRACE: ${MODULE_ACCESS_CODE_CRACE:-}
     depends_on:
       db:
         condition: service_healthy

@@ -11,6 +11,7 @@ def register(client: TestClient) -> None:
         json={"email": f"{uuid4()}@example.com", "password": "StrongPass123", "name": "Athlete"},
     )
     assert response.status_code == 201
+    assert client.post("/api/v1/modules/crace/unlock", json={"code": "test-module-code"}).status_code == 200
 
 
 def test_crace_state_is_private_and_has_baseline():

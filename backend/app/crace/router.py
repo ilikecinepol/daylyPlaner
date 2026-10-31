@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 from ..api.dependencies import current_user, iso_utc
 from ..database import get_db
 from ..models import CraceProfile, CraceWorkout
+from ..modules import require_module
 
 
-router = APIRouter(prefix="/api/v1/crace", tags=["crace"])
+router = APIRouter(prefix="/api/v1/crace", tags=["crace"], dependencies=[Depends(require_module("crace"))])
 RACE_DATE = date(2026, 12, 5)
 PLAN_KEYS = {"baseline", *(f"w{number:02d}" for number in range(2, 12)), "race"}
 

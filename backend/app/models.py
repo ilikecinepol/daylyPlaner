@@ -31,6 +31,16 @@ class User(Base, TimestampMixin):
     contact_info: Mapped[str] = mapped_column(String(500), default="")
     avatar_data_url: Mapped[str] = mapped_column(Text, default="")
 
+class ModuleEntitlement(Base):
+    __tablename__ = "module_entitlements"
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    module: Mapped[str] = mapped_column(String(30), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str] = mapped_column(String(30), default="access_code")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now, onupdate=now)
+
 class Project(Base, TimestampMixin):
     __tablename__ = "projects"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)

@@ -3,7 +3,9 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 def register(c):
-    return c.post("/api/v1/auth/register",json={"email":f"{uuid4()}@example.com","password":"StrongPass123","name":"Finance"}).json()
+    user=c.post("/api/v1/auth/register",json={"email":f"{uuid4()}@example.com","password":"StrongPass123","name":"Finance"}).json()
+    assert c.post("/api/v1/modules/finance/unlock",json={"code":"test-module-code"}).status_code==200
+    return user
 def account(c,name="Карта",opening="50000.00",currency="RUB"):
     r=c.post("/api/v1/finance/accounts",json={"name":name,"type":"bank_card","currency":currency,"opening_balance":opening,"is_archived":False});assert r.status_code==201;return r.json()
 def tx(c,a,kind,amount,**extra):

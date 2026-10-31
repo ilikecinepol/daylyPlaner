@@ -1,5 +1,5 @@
-const CACHE='plan-v7.1';
-const ASSETS=['/','/index.html','/styles.css?v=3.3','/app.js?v=7.1','/frontend/js/api.js','/frontend/js/profile.js','/frontend/js/goals.js','/frontend/js/finance.js','/frontend/js/calendar.js','/frontend/js/ai.js','/frontend/js/crace.js','/manifest.webmanifest'];
+const CACHE='plan-v7.2';
+const ASSETS=['/','/index.html','/styles.css?v=3.4','/app.js?v=7.2','/frontend/js/api.js','/frontend/js/profile.js','/frontend/js/goals.js','/frontend/js/finance.js','/frontend/js/calendar.js','/frontend/js/ai.js','/frontend/js/crace.js','/manifest.webmanifest'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{

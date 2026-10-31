@@ -11,8 +11,9 @@ from ..database import get_db
 from ..models import FinanceAccount, FinanceBudget, FinanceCategory, FinanceTransaction, Goal, Project, ProjectMember, Task, TaskFinanceBinding
 from .schemas import AccountIn, BudgetIn, CategoryIn, TransactionIn
 from .service import execute_task_finance
+from ..modules import require_module
 
-router=APIRouter(prefix="/api/v1/finance",tags=["finance"])
+router=APIRouter(prefix="/api/v1/finance",tags=["finance"],dependencies=[Depends(require_module("finance"))])
 DEFAULTS={"expense":["Продукты","Транспорт","Жильё","Подписки","Здоровье","Спорт","Развлечения","Покупки","Образование","Другое"],"income":["Зарплата","Подработка","Продажи","Подарки","Другое"]}
 
 def money(value):return format(Decimal(value or 0),".2f")
